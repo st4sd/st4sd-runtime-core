@@ -1,0 +1,30 @@
+{
+  "panther": {
+    "pattern":"cds|fairthorpe|paragon",
+    "replacement":"panther"
+  },
+  "rla09": {
+    "pattern":"cds|fairthorpe|paragon",
+    "replacement":"panther"
+  },
+  "rla09-paragon": {
+    "pattern":"cds|fairthorpe|paragon",
+    "replacement":"paragon"
+  },
+  "paragon": {
+    "pattern":"cds|fairthorpe|panther",
+    "replacement":"paragon"
+  },
+  "paragonI": {
+    "pattern":"cds|fairthorpe|panther",
+    "replacement":"paragon"
+  },
+  "pantherI": {
+    "pattern":"cds|fairthorpe|panther",
+    "replacement":"panther"
+  },
+  "scafellpikeSKL": {
+    "pattern":"gpfs/cds",
+    "replacement":"lustre/scafellpike"
+  }
+} 

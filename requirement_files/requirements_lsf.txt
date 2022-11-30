@@ -1,0 +1,1 @@
+-e git+https://github.com/PlatformLSF/platform-python-lsf-api.git#egg=platform_python_lsf_api

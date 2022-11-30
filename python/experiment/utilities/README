@@ -1,0 +1,4 @@
+Module to be deprecated
+
+data.py - Will be replaced by pandas
+fsearch.py - Will be migrated into model 

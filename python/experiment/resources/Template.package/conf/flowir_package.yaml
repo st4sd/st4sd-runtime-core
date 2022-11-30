@@ -1,0 +1,24 @@
+application-dependencies: {}
+virtual-environments: {}
+status-report:
+  0:
+    arguments: '1'
+    executable: echo
+    stage-weight: 1.0
+output: {}
+platforms:
+- default
+environments:
+  default:
+    environment:
+      OMP_NUM_THREADS: '4'
+blueprint:
+  default: {}
+components: []
+variables:
+  default:
+    global: {}
+    stages:
+      0:
+        stage-name: Setup
+version: 0.2.0

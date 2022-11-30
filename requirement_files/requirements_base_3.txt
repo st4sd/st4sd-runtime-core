@@ -1,0 +1,7 @@
+#It usually leads to less errors if these packages are already installed before
+#installing others
+cython
+reactivex >= 4.0.0
+
+# VV: Set pytest-xdist to 1.34.0 to address some inconsistencies with test_control.py in python 3 (see #1093)
+pytest-xdist==1.34.0

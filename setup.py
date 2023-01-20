@@ -13,10 +13,8 @@ from setuptools import find_packages, setup
 here = path.abspath(path.dirname(__file__))
 
 # Get the long description from the relevant file
-#with open(path.join(here, 'DESCRIPTION.rst'), encoding='utf-8') as f:
-#    long_description = f.read()
-
-long_description=""
+with open(path.join(here, 'README.MD'), encoding='utf-8') as f:
+    long_description = f.read()
    
 setup(
     name='st4sd-runtime-core',
@@ -31,6 +29,7 @@ setup(
 
     description='A tool for creating and deploying computational experiments',
     long_description=long_description,
+    long_description_content_type='text/markdown',
 
     # The project's main homepage.
     url='https://github.com/st4sd/st4sd-runtime-core',

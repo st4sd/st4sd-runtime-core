@@ -1263,9 +1263,7 @@ class FlowIRExperimentConfiguration:
 
                 log = logging.getLogger('Environment')
                 log.log(15, 'Could not find environment %s in %s' % (
-                    e.name, pretty_json(e.flowir[
-                                            experiment.model.frontends.flowir.FlowIR.FieldEnvironments])
-                ))
+                    e.name, pretty_json(e.flowir[experiment.model.frontends.flowir.FlowIR.FieldEnvironments])))
                 raise
             environment = (self._system_vars or {}).copy()
             environment = environment.copy()
@@ -1298,6 +1296,17 @@ class FlowIRExperimentConfiguration:
                     if key not in default_env:
                         default_env[key] = os.environ.get(key, '')
 
+                    if key in environment:
+                        # VV: The environment already defines the same environment variable. The developer may be using
+                        # `KEY: $KEY:some other value` to use the value of $KEY in the default context as a building
+                        # part of the eventual value of $KEY (e.g. to prepend/append a directory to $PATH etc).
+                        # Here, we just expand $KEY using the `default` environment context. Then, we record this new
+                        # value in `default_env` so that if other env-vars in this environment rely on $KEY they
+                        # actually get what we just computed.
+                        environment[key] = experiment.model.frontends.flowir.replace_env_var(
+                            environment[key], key, default_env[key])
+                        default_env[key] = environment[key]
+
                 for env_var in environment:
                     env_value = environment[env_var]
 
@@ -1312,14 +1321,11 @@ class FlowIRExperimentConfiguration:
                         if key not in default_env:
                             msg = ("Environment %s references DEFAULTS variable %s which doesn't have a value "
                                     "in the default environment. Will resolve it using active shell" % (
-                                        environment_name, key
-                            ))
+                                        environment_name, key))
                             self.suppressed_warning(msg)
                             continue
 
-                        env_value = experiment.model.frontends.flowir.replace_env_var(
-                            env_value, key, default_env[key]
-                        )
+                        env_value = experiment.model.frontends.flowir.replace_env_var(env_value, key, default_env[key])
 
                     environment[env_var] = env_value
 

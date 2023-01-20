@@ -154,3 +154,51 @@ def test_environment_coerce_strings(output_dir: str):
 
     assert env['INTEGER'] == '1'
     assert env['STRING'] == 'hello'
+
+
+def test_environment_override_defaults(output_dir: str):
+    flowir = """
+        environments:
+          default:
+            test:
+              DEFAULTS: BASE_DIR:PATH
+              BASE_DIR: /foo/bar
+              FORCEFIELD_DIR: ${BASE_DIR}/forcefield
+        components:
+        - name: hello
+          command:
+            environment: test
+            executable: echo
+            arguments: "${FORCEFIELD_DIR}"
+        """
+
+    exp = experiment_from_flowir(flowir, output_dir)
+    conf: experiment.model.data.ComponentSpecification = exp.graph.nodes['stage0.hello']['componentSpecification']
+
+    env = conf.environment
+
+    assert env['BASE_DIR'] == '/foo/bar'
+    assert env['FORCEFIELD_DIR'] == '/foo/bar/forcefield'
+
+    flowir = """
+            environments:
+              default:
+                test:
+                  DEFAULTS: PATH
+                  BASE_DIR: /foo/bar
+                  FORCEFIELD_DIR: ${BASE_DIR}/forcefield
+            components:
+            - name: hello
+              command:
+                environment: test
+                executable: echo
+                arguments: "${FORCEFIELD_DIR}"
+            """
+
+    exp = experiment_from_flowir(flowir, output_dir)
+    conf: experiment.model.data.ComponentSpecification = exp.graph.nodes['stage0.hello']['componentSpecification']
+
+    env = conf.environment
+
+    assert env['BASE_DIR'] == '/foo/bar'
+    assert env['FORCEFIELD_DIR'] == '/foo/bar/forcefield'

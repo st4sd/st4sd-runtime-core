@@ -4321,6 +4321,7 @@ class ExperimentRestAPI:
             self,
             rest_uid: str,
             include_properties: List[str] | None = None,
+            stringify_nan: bool = False,
             query: Optional[DictMongoQuery] = None,
             _api_verbose:bool = True):
         """Retrieve the `experiment` Document associated with the rest_uid that the ST4SD Runtime Service REST-API
@@ -4338,6 +4339,7 @@ class ExperimentRestAPI:
                 columns in that DataFrame will be those specified in `include_properties`. Column names that do not
                 exist will in the DataFrame will be silently discarded. The column `input-id` will always be fetched
                 even if not specified in `include_properties`.
+            stringify_nan: A boolean flag that allows converting NaN and infinite values to strings
             query: A mongo query to use for further filtering results
             _api_verbose: Set to true to print INFO level messages
 
@@ -4359,6 +4361,7 @@ class ExperimentRestAPI:
         ret = self.cdb_get_document_experiment(
             query=query,
             include_properties=include_properties,
+            stringify_nan=stringify_nan,
             _api_verbose=_api_verbose)
 
         if len(ret) == 0:

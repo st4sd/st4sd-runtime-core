@@ -1532,8 +1532,9 @@ class LSFRequestArbitrator(object):
         timeout = self.workerNotifyInterval + 60
         for workerId in list(self.workerStatusDict.keys()):
             delta = now - self.workerStatusDict[workerId]
-            if  delta > datetime.timedelta(seconds=timeout):
-                self.log.warning('Worker process %d has not reported in %d seconds - terminating' % (workerId, delta))
+            if delta > datetime.timedelta(seconds=timeout):
+                self.log.warning('Worker process %d has not reported in %f seconds - terminating' % (
+                    workerId, delta.total_seconds()))
                 self.requestHandlers[workerId].terminate()
                 p = multiprocessing.Process(target=RequestHandler,
                                             args=(workerId,

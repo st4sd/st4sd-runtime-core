@@ -260,7 +260,9 @@ def parse_k8s_restapi_exception(
 
 
 class NativeScheduledTask(experiment.runtime.task.Task):
-
+    # VV: The poolScheduler will be instantiated by a single NativeScheduledTask,
+    # all NativeScheduledTask use the same pool
+    poolK8SNativeTasks: reactivex.scheduler.ThreadPoolScheduler | None = None
     """Starts a Task using the K8s native scheduler"""
 
     def __init__(self,
@@ -386,6 +388,13 @@ class NativeScheduledTask(experiment.runtime.task.Task):
                 The @template_pod_spec is applied first and NativeScheduledTask may override @template_pod_spec using
                 configuration encoded in @options
         '''
+        # VV: ThreadPoolGenerator.get_pool() is threadSafe, so if multiple threads call it concurrently they'll all get
+        # the same pool. GIL will then guarantee that every thread will read the same value even if multiple threads
+        # end up "updating" ComponentState.componentScheduler.
+        tpg = experiment.runtime.utilities.rx.ThreadPoolGenerator
+        if NativeScheduledTask.poolK8SNativeTasks is None:
+            NativeScheduledTask.poolK8SNativeTasks = tpg.get_pool(tpg.Pools.BackendK8s)
+
         # VV: Convert None to "none" for these 2 options
         if garbage_collect is None:
             garbage_collect = "none"

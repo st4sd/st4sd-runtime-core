@@ -52,10 +52,6 @@ moduleLogger = logging.getLogger('engine')
 #delay() on each concat i.e. it pull the 1 element from the observable but this hits the delay
 #a = rx.Observable.from_(range(10)).map(lambda x: rx.Observable.just(x).delay(5000)).concat_all()
 
-enginePoolScheduler = reactivex.scheduler.ThreadPoolScheduler(50)
-manualEmissions = reactivex.scheduler.ThreadPoolScheduler(20)
-taskPoolScheduler = reactivex.scheduler.ThreadPoolScheduler(100)
-
 ENGINE_RUN_START_DELAY_SECONDS = 1.0
 ENGINE_LAUNCH_DELAY_SECONDS = 5.0
 
@@ -194,6 +190,17 @@ def archive_stream(filepath, storage_dir, stream_type, logger, max_files=5):
 class Engine:
     """Class which handles launching and monitoring of Job
     """
+    # VV: Each poolScheduler will be instantiated by a single Engine (not necessarily the same Engine) and all
+    # engines will re-use them
+
+    # VV: emits the observables of engines
+    enginePoolScheduler: reactivex.scheduler.ThreadPoolScheduler | None = None
+
+    # VV: triggers emissions to flow skipping the 5 seconds wait time
+    triggerPoolScheduler: reactivex.scheduler.ThreadPoolScheduler | None = None
+
+    # VV: threads in here call the task.wait() method, they continue when the task terminates
+    taskPoolScheduler: reactivex.scheduler.ThreadPoolScheduler | None = None
 
     @classmethod
     def engineForComponentSpecification(cls, job):
@@ -243,6 +250,18 @@ class Engine:
             in its own constructor. When this value is set to False the child class is expected
             to properly initialize state_updates. (default is True).
         """
+        # VV: ThreadPoolGenerator.get_pool() is threadSafe, so if multiple threads call it concurrently they'll all get
+        # the same pool. GIL will then guarantee that every thread will read the same value even if multiple threads
+        # end up "updating" Engine.enginePoolScheduler.
+        tpg = experiment.runtime.utilities.rx.ThreadPoolGenerator
+        if Engine.enginePoolScheduler is None:
+            Engine.enginePoolScheduler = tpg.get_pool(tpg.Pools.Engine)
+
+        if Engine.triggerPoolScheduler is None:
+            Engine.triggerPoolScheduler = tpg.get_pool(tpg.Pools.EngineTrigger)
+
+        if Engine.taskPoolScheduler is None:
+            Engine.taskPoolScheduler = tpg.get_pool(tpg.Pools.EngineTask)
 
         # VV: Set to True when run is Called, RepeatingEngine sets to True when canConsume() first return True
         self._consume = False
@@ -342,7 +361,7 @@ class Engine:
             # VV: The manual emitter produces a dictionary with the same format as self.stateDictionary
             self._manual_emitter,
         ).pipe(
-                op.observe_on(enginePoolScheduler),
+                op.observe_on(Engine.enginePoolScheduler),
                 op.map(lambda x: (x, self))
         )
 
@@ -367,7 +386,7 @@ class Engine:
             self.log.debug("TerminationSubject already exists invoking its on_completed() now")
             self._termination_subject.on_completed()
 
-        self._termination_subject = reactivex.subject.ReplaySubject(scheduler=manualEmissions)
+        self._termination_subject = reactivex.subject.ReplaySubject(scheduler=Engine.triggerPoolScheduler)
         self.terminationObservable = self._termination_subject.pipe(
             op.first(),
         )
@@ -381,7 +400,7 @@ class Engine:
         current.update(what)
 
         reactivex.just(current).pipe(
-            op.observe_on(manualEmissions)
+            op.observe_on(Engine.triggerPoolScheduler)
         ).subscribe(on_next=lambda x: self._manual_emitter.on_next(x),
                     on_error=CheckState)
 
@@ -735,10 +754,10 @@ class Engine:
             self.terminationObservable,
             startObservable.pipe(op.delay(ENGINE_LAUNCH_DELAY_SECONDS)),
         ).pipe(
-            op.subscribe_on(enginePoolScheduler),
+            op.subscribe_on(Engine.enginePoolScheduler),
             op.take_while(lambda e: self.exitReason() is None),
             op.take_while(lambda e: e not in experiment.model.codes.exitReasons),
-            op.observe_on(enginePoolScheduler),
+            op.observe_on(Engine.enginePoolScheduler),
             op.first(),
             op.map(InitPerformanceInfo),
             op.map(LaunchTask),
@@ -757,7 +776,7 @@ class Engine:
             HandleTaskObservableCompletion, self.log, 'HandleTaskObservableCompletion')
 
         taskLaunchObservable.pipe(
-            op.observe_on(taskPoolScheduler),
+            op.observe_on(Engine.taskPoolScheduler),
             op.map(Wait),
             op.map(FinalisePerformanceInfo)
         ).subscribe(on_next=handle_task_exit,  # set exit-reason emits state
@@ -772,7 +791,7 @@ class Engine:
         #If it gets one the process either launched OR will never launch
         terminate = experiment.runtime.utilities.rx.report_exceptions(Terminate, self.log, 'Terminate')
         taskLaunchObservable.pipe(
-            op.observe_on(enginePoolScheduler),
+            op.observe_on(Engine.enginePoolScheduler),
             # VV: The code below expects emissions to be hashable. It checks whether they're an exitReason or not.
             # However, taskLaunchObservable emits dictionaries, so convert those to None
             op.map(lambda x: None),
@@ -1474,7 +1493,7 @@ class Engine:
             op.map(final_map),
             op.publish(),
         ).auto_connect().pipe(
-            op.observe_on(enginePoolScheduler)
+            op.observe_on(Engine.enginePoolScheduler)
         )
 
         return state_updates

@@ -49,9 +49,6 @@ if TYPE_CHECKING:
     from experiment.model.graph import WorkflowGraph, ComponentSpecification
 
 
-controllerPool = reactivex.scheduler.ThreadPoolScheduler(40)
-
-
 def TransitionComponentToFinalState(component, exitReason, returncode):
     # type: (ComponentState, Optional[str], Optional[int]) -> None
     '''Based on exitReason will transition component to correct final state
@@ -139,6 +136,9 @@ class Controller:
         self._memoization_fuzzy = memoization_fuzzy
         if experiment_name is None:
             experiment_name = str(uuid.uuid4())
+
+        tpg = experiment.runtime.utilities.rx.ThreadPoolGenerator
+        self.controllerPool = tpg.get_pool(tpg.Pools.Controller)
 
         # VV: Controller can query the CDB for memoization components of past experimetns; their outputs can be used
         #     in place of executing a component for the current experiment
@@ -904,12 +904,12 @@ class Controller:
 
         component.notifyFinished \
             .pipe(
-                op.observe_on(controllerPool)
+                op.observe_on(self.controllerPool)
             ).subscribe(on_next=finished_check, on_error=on_error_notifyFinished(component))
 
         component.notifyPostMortem \
             .pipe(
-                op.observe_on(controllerPool),
+                op.observe_on(self.controllerPool),
                 op.filter(lambda e: e[1].finishCalled is False)
             ).subscribe(on_next=postmortem_check, on_error=on_error_notifyPostMortem(component))
         self.comp_staged_in.add(component)
@@ -1258,7 +1258,7 @@ class Controller:
                     return handle_stateUpdates
 
                 reactivex.merge(*[e.stateUpdates for e in engines]).pipe(
-                    op.observe_on(controllerPool),
+                    op.observe_on(self.controllerPool),
                     op.take_while(lambda x: self.enable_optimizer)
                 ).subscribe(
                     on_next=lambda state_engine: safe_observe(state_engine[0], state_engine[1]),
@@ -1322,7 +1322,7 @@ class Controller:
 
                     if producers:
                         reactivex.merge(*[prod.engine.stateUpdates for prod in producers])\
-                            .pipe(op.observe_on(controllerPool))\
+                            .pipe(op.observe_on(self.controllerPool))\
                             .subscribe(
                                 on_next=push_notification(consumer),
                                 on_error=on_error_pushNotification(consumer, producers))
@@ -1352,12 +1352,12 @@ class Controller:
 
             # VV: Wait till components are finished to resolve their output anti-dependencies
             reactivex.merge(*[c.notifyFinished for c in staged_in]) \
-                .pipe(op.observe_on(controllerPool)) \
+                .pipe(op.observe_on(self.controllerPool)) \
                 .subscribe(on_next=finished_check, on_error=handle_error_finished)
 
             # VV: Hook up the notifyPostMortem observable
             reactivex.merge(*[c.notifyPostMortem for c in staged_in])\
-                .pipe(op.observe_on(controllerPool), op.filter(lambda e: e[1].finishCalled is False)) \
+                .pipe(op.observe_on(self.controllerPool), op.filter(lambda e: e[1].finishCalled is False)) \
                 .subscribe(on_next=postmortem_check, on_error=handle_error_postmortem)
 
             # VV: Finally, execute the components

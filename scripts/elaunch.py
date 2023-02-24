@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import code
+import datetime
 import errno
 import itertools
 import json
@@ -681,6 +682,7 @@ def Run(
                     rootLogger.info(f"Generating documentDescriptions for components in stage {stage_index}")
 
                     docs = stage.documentDescription
+                    compExperiment.statusFile.setUpdated(datetime.datetime.now())
 
                     # VV: This will populate component-state, memoization-hash, and instance
                     # however instance will be overridden by discoverer to include actual gateway-id
@@ -1932,6 +1934,8 @@ if __name__ == "__main__":
         #Because unexpected reraise error so we get traceback
         raise_with_traceback(error)
     finally:
+        time_completed = datetime.datetime.now()
+
         #NOTE: Stop the halt/kill monitor - Unfortunately this means we can't kill/halt after this point
         rootLogger.info('Clean-up - Stopping halt monitor')
         cancelHaltMon.set()
@@ -1998,6 +2002,8 @@ if __name__ == "__main__":
 
             # Final status update
             rootLogger.info('Clean-up - Updating status file')
+            compExperiment.statusFile.setCompleted(time_completed)
+            compExperiment.statusFile.setUpdated(time_completed)
             compExperiment.statusFile.setExperimentState(experiment.model.codes.FINISHED_STATE)
             compExperiment.statusFile.persistentUpdate()
             rootLogger.info("Clean-up - Final status was")
@@ -2008,7 +2014,7 @@ if __name__ == "__main__":
                 rootLogger.critical(traceback.format_exc())
                 rootLogger.warning("Unable to write status: %s" % error)
 
-            # Consolidate storage (somethings may have been stored in temporary storage)
+            # Consolidate storage (some things may have been stored in temporary storage)
             rootLogger.info("Clean-up - Consolidating")
             try:
                 compExperiment.instanceDirectory.consolidate()

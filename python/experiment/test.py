@@ -54,7 +54,10 @@ def ValidatePackage(
         instance_name: if not none instead of using Path(packagePath).with_suffix('.instance') name will be used
            can be combined with stamp
         custom_application_sources(Dict[str, str]): Overrides source of application dependencies, format is
-               {"<application_dependency_entry_name>": "/absolute/path"}
+               {"<application_dependency_entry_name>": "/absolute/path[:link/copy]"}
+               The :link and :copy suffixes determine whether to link or copy the path under the instance directory.
+               The suffix is optional and defaults to :link. If the path contains a ':' character,
+               use '%3A' instead (i.e. url-encode the : character)"
 
     Returns:
          a tuple with three elements (isValid, error, Experiment)

@@ -803,7 +803,7 @@ class LivePatcher:
             # VV: Ensure that all application_dependencies and virtual_environments are linked
 
             application_dependencies = new_concrete.get_application_dependencies()
-            experiment.model.data.Experiment._createApplicationLinks(
+            experiment.model.data.Experiment._populateApplicationSources(
                 application_dependencies, cls.comp_experiment.instanceDirectory.packagePath,
                 cls.comp_experiment.instanceDirectory, ignore_existing=True,
                 custom_application_sources=cls.custom_application_sources
@@ -1239,7 +1239,10 @@ def build_parser() -> NoSystemExitOptparseOptionParser:
                                   "considered a security risk and should be avoided. Default is No.")
     launchOptions.add_option("-s", "--applicationDependencySource", dest="application_dependency_source",
                              help="Point an application dependency to a specific "
-                                  "path on the filesystem `applicationDependencyEntry:/path/to/new/source`",
+                                  "path on the filesystem `applicationDependencyEntry:/path/to/new/source[:link/:copy]`"
+                                  "The :link and :copy suffixes determine whether to link or copy the path under the "
+                                  "instance directory. They suffix is optional and defaults to :link. If the path "
+                                  "contains a ':' character, use '%3A' instead (i.e. url-encode the : character)",
                              default=[], metavar="APPLICATION_DEPENDENCY_SOURCE", action="append")
     launchOptions.add_option('', '--manifest', dest="manifest", metavar="PATH_TO_MANIFEST_FILE", default=None,
                              help="Optional path to manifest YAML file to use when setting up package directory from a "

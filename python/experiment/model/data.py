@@ -694,7 +694,7 @@ class Experiment:
     ReservedDocumentDescriptorKeys = ['instance', 'type', ]
 
     @classmethod
-    def _createApplicationLinks(
+    def _populateApplicationSources(
             cls,
             application_dependencies,  # type: List[str]
             packagePath,
@@ -717,7 +717,10 @@ class Experiment:
             ignore_existing(bool): If set to True will not raise an exception when the application dependency name
                 conflicts with an existing path inside the root directory of the workflow instance
             custom_application_sources(Dict[str, str]): Overrides source of application dependencies, format is
-               {"<application_dependency_entry_name>": "/absolute/path"}
+               {"<application_dependency_entry_name>": "/absolute/path[:link/copy]"}
+               The :link and :copy suffixes determine whether to link or copy the path under the instance directory.
+               The suffix is optional and defaults to :link. If the path contains a ':' character,
+               use '%3A' instead (i.e. url-encode the : character)"
         """
 
         custom_application_sources = custom_application_sources or {}
@@ -739,6 +742,7 @@ class Experiment:
             def firstExisting(locations):
 
                 retval = None
+
                 for location in locations:
                     if os.path.exists(location):
                         retval = location 
@@ -746,12 +750,31 @@ class Experiment:
                 return retval
 
             for package in application_dependencies:
+                # VV: An applicationDependencySource may be created as either a link or a copy of the pointed path
+                # The default is a link
+                make_link = True
                 if package in custom_application_sources:
                     # VV: Users have specified the source location of the application dependency in the
                     # commandline of elaunch.py
                     # this will override application dependencies even if they're defined as absolute paths!
                     # determine package folder name using the information in FlowIR
-                    path = firstExisting([custom_application_sources[package]])
+                    path = custom_application_sources[package]
+
+                    try:
+                        path, method = path.split(':', 1)
+                    except ValueError:
+                        pass
+                    else:
+                        if method == 'copy':
+                            make_link = False
+                        elif method != 'link':
+                            raise experiment.model.errors.ExperimentInvalidConfigurationError(
+                                f"Invalid destination method, given for applicationDependencySource "
+                                f"{package}={custom_application_sources[package]}. Valid methods are :link and :copy "
+                                f"(:link if omitted)")
+                    # VV: Finaly, expand decode '%3A' to ':' to handle paths that contain the ':` character
+                    path = path.replace('%3A', ':')
+                    path = firstExisting([path])
                     package_folder = os.path.split(package)[1]
                     search_locations = [os.path.split(package)[0]]
                 elif package.startswith(os.path.sep) is False:
@@ -765,13 +788,13 @@ class Experiment:
                     search_locations = [os.path.split(package)[0]]
 
                 packageName = experiment.model.frontends.flowir.FlowIR.application_dependency_to_name(package_folder)
-                linkName = os.path.join(instanceDirectory.location, packageName)
+                path_dest = os.path.join(instanceDirectory.location, packageName)
 
                 if packageName is None:
                     raise experiment.model.errors.ExperimentInvalidConfigurationError(
                         "Invalid name, %s, given for application package in conf file" % package)
 
-                if os.path.isdir(linkName):
+                if os.path.isdir(path_dest):
                     log.warning("Will not create application link for %s because link already exists" % package)
                     continue
 
@@ -780,15 +803,21 @@ class Experiment:
                         package_folder, ",".join(search_locations)))
 
                 try:
-                    if ignore_existing and os.path.isdir(linkName):
+                    if ignore_existing and os.path.isdir(path_dest):
                         log.info("Skipping creating application package %s->%s because it already exists" % (
-                            path, linkName))
+                            path, path_dest))
+                    elif make_link:
+                        os.symlink(path, path_dest)
                     else:
-                        os.symlink(path, linkName)
+                        try:
+                            shutil.copytree(path, path_dest)
+                        except OSError as data:
+                            if data.errno != errno.EEXIST:
+                                raise
                 except Exception as error:
                     raise_with_traceback(experiment.model.errors.FilesystemInconsistencyError(
-                        "Could not create link to application package %s at %s" % (path, linkName),
-                        error))
+                        "Could not create %s to application package %s at %s" % (
+                            "link" if make_link else "copy", path, path_dest), error))
                 else:
                     log.info("Created application link %s to %s" % (packageName, path))
         else:   
@@ -929,7 +958,10 @@ class Experiment:
             instance_name: if not none instead of using Path(packagePath).with_suffix('.instance') name will be used
                can be combined with stamp
             custom_application_sources(Dict[str, str]): Overrides source of application dependencies, format is
-               {"<application_dependency_entry_name>": "/absolute/path"}
+               {"<application_dependency_entry_name>": "/absolute/path[:link/copy]"}
+               The :link and :copy suffixes determine whether to link or copy the path under the instance directory.
+               The suffix is optional and defaults to :link. If the path contains a ':' character,
+               use '%3A' instead (i.e. url-encode the : character)"
 
         On return from this method a new directory will exist on disk
         which will contain the experiment data
@@ -1072,8 +1104,8 @@ class Experiment:
                     raise experiment.model.errors.ExperimentSetupError(
                         desc=msg, underlyingError=ValueError(msg), instance_dir=instanceDirectory)
 
-                Experiment._createApplicationLinks(application_dependencies, experimentPackage.location, instanceDirectory,
-                                                   custom_application_sources=custom_application_sources)
+                Experiment._populateApplicationSources(application_dependencies, experimentPackage.location, instanceDirectory,
+                                                       custom_application_sources=custom_application_sources)
 
             #FIXME: This is a hack for python scripts needed by the application which have been installed in
             #standard python manner i.e. as a module

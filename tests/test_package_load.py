@@ -65,6 +65,49 @@ def test_load_yaml_with_special_folders(output_dir):
     compExperiment.validateExperiment(ignoreTestExecutablesError=False)
 
 
+@pytest.mark.parametrize("copy_or_link", ['copy', 'link'])
+def test_application_dependency_source_copy_link(output_dir: str, copy_or_link: str):
+    tempdir = tempfile.gettempdir()
+
+    flowir = """
+    application-dependencies:
+        default:
+          - special
+    
+    components:
+    - name: hello
+      command:
+        executable: echo
+        arguments: special/message.txt:output
+      references:
+      - special/message.txt:output
+    """
+
+    filename = f"wf-{uuid.uuid4()}.yml"
+
+    utils.populate_files(output_dir, {filename: flowir,
+                                      os.path.join("special", "message.txt"): "hello world"})
+
+    app_sources = {
+        'special': ':'.join([os.path.join(output_dir, 'special'), copy_or_link])
+    }
+    isValid, error, compExperiment = experiment.test.ValidatePackage(
+        os.path.join(output_dir, filename), location=tempdir, custom_application_sources=app_sources)
+
+    assert isValid
+    assert error is None
+
+    # VV: Now make sure that the package is valid - perform check_executable checks too
+    compExperiment.validateExperiment(ignoreTestExecutablesError=False)
+
+    path_special = os.path.join(compExperiment.instanceDirectory.location, 'special')
+
+    should_be_link = (copy_or_link == "link")
+    is_link = os.path.islink(path_special)
+    logger.info(f"For appDepSource {app_sources['special']}, is_link={is_link}")
+    assert is_link == should_be_link
+
+
 def test_load_package_that_cannot_replicate(output_dir):
     flowir = """
     components:

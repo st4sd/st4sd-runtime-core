@@ -77,8 +77,8 @@ setup(
     #   Issue is not resolved -> see https://github.ibm.com/hartreechem/flow/issues/1097 and linked issues
     install_requires=['reactivex>=4.0.0', 'pyyaml', 'pytest', 'pytest-xdist', 'pytest-timeout',
                       'networkx', 'matplotlib<3.4.0', 'requests', 'six', 'kubernetes', 'psutil', 'boto3',
-                      'pyrsistent', 'js2py', 'pymongo>=4.0', 'papermill', 'pandas', 'future', 'pydantic'
-                      ], #, 'pygraphviz'],
+                      'pyrsistent', 'js2py', 'pymongo>=4.0', 'papermill', 'pandas', 'future', 'pydantic',
+                      'keyring', 'typer'], #, 'pygraphviz'],
 
     # List additional groups of dependencies here (e.g. development
     # dependencies). You can install these using the following syntax,
@@ -124,5 +124,6 @@ setup(
         "scripts/ememo.py",
         "scripts/ewrap.py",
         "scripts/einputs.py",
+        "scripts/stp",
     ]
 )

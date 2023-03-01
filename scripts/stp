@@ -1,0 +1,11 @@
+#! /usr/bin/env python
+# coding=UTF-8
+
+# Copyright IBM Inc. 2015, 2019. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Author(s): Alessandro Pomponio, Vassilis Vassiliadis
+
+import experiment.cli.stp as stp
+
+if __name__ == "__main__":
+    stp.app()

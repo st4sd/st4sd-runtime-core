@@ -426,15 +426,24 @@ class Status:
     Instances are backed onto a file status.txt in the experiments output/ directory.
     Update of this file is handled by external monitors via this class'''
 
-    defaults = {'stages': [],
-                'current-stage': None,
-                'stage-progress': 0,
-                'total-progress': 0,
-                'experiment-state': 'Initialising',
-                'stage-state': 'Initialising',
-                'updated': datetime.datetime.now(),
-                'exit-status': 'N/A',
-                'cost': 0}
+    defaults = {
+        'stages': [],
+        'current-stage': None,
+        'stage-progress': 0,
+        'total-progress': 0,
+        'experiment-state': 'Initialising',
+        'stage-state': 'Initialising',
+        # VV: updated is deprecated and will be removed.
+        # its timestamp format is %Y-%m-%dT%H%M%S.%f
+        'updated': datetime.datetime.now(),
+        'exit-status': 'N/A',
+        'cost': 0,
+        'created-on': 'N/A',
+        'updated-on': 'N/A',
+        'completed-on': 'N/A',
+    }
+
+    FORMAT_TIMESTAMP_ON_FIELDS = "%Y-%m-%dT%H:%M:%S.%f%z"
 
     @classmethod
     def statusFromFile(cls, filename):
@@ -481,12 +490,13 @@ class Status:
         Values which are "datetime" instances are formatted using the string "%d%m%y-%H%M%S.%f"
         """
         ret = {}
-        for x in self.data:
-            v = self.data[x]
+
+        timestamp_formats = {'updated': "%Y-%m-%dT%H%M%S.%f"}
+        for x, v in self.data.items():
             if not isinstance(v, datetime.datetime):
                 v = '%s' % v
             else:
-                v = v.strftime('%d%m%y-%H%M%S.%f')
+                v = v.strftime(timestamp_formats.get(x, Status.FORMAT_TIMESTAMP_ON_FIELDS))
             ret['%s' % x] = v
         return ret
 
@@ -518,9 +528,14 @@ class Status:
 
         return self.data['stage-state']
 
-    def updated(self):
+    def created(self) -> Union[str, datetime.datetime]:
+        return self.data['created-on']
 
-        return self.data['updated']
+    def updated(self) -> Union[str, datetime.datetime]:
+        return self.data['updated-on']
+
+    def completed(self) -> Union[str, datetime.datetime]:
+        return self.data['completed-on']
 
     def cost(self):
 
@@ -563,9 +578,15 @@ class Status:
 
         self.data['experiment-state'] = state
 
-    def setUpdated(self, value):
+    def setCreated(self, value: Union[datetime.datetime, str]):
+        self.data['created-on'] = value
 
+    def setUpdated(self, value):
         self.data['updated'] = value
+        self.data['updated-on'] = value
+
+    def setCompleted(self, value: Union[datetime.datetime, str]):
+        self.data['completed-on'] = value
 
     def setCost(self, cost):
 
@@ -1376,7 +1397,26 @@ class Experiment:
             if os.path.exists(statusFileName):
                 self._statusFile = Status.statusFromFile(statusFileName)
             else:
+                # VV: Sniff the "created-on" timestamp by looking at the $INSTANCE_DIR_NAME
+                # The directory looks like <some-name-here>-%Y-%m-%dT%H%M%S.%f.instance
+                stamp_format = "%Y-%m-%dT%H%M%S.%f"
+                basename = os.path.split(self.instanceDirectory.instancePath)[1]
+                basename = os.path.splitext(basename)[0]
+                components = basename.split("-")
+
+                created_on = datetime.datetime.now()
+                if len(components) > 3:
+                    stamp = '-'.join(components[-3:])
+                    try:
+                        created_on = datetime.datetime.strptime(stamp, stamp_format)
+                    except ValueError:
+                        # VV: stamp didn't match what we were hoping it to be, that's fine use 'now'
+                        pass
+
                 self._statusFile = Status(statusFileName, {}, [stage.name for stage in self._stages])
+                self._statusFile.setCreated(created_on)
+                self._statusFile.setUpdated(created_on)
+
                 if updateInstanceConfiguration:
                     self.statusFile.update()
         except OSError as error:

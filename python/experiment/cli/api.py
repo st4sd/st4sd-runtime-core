@@ -10,22 +10,24 @@ import experiment.service.errors
 from experiment.cli.configuration import Configuration
 
 
-def get_api(ctx: typer.Context):
+def get_api(ctx: typer.Context, for_context: str = None):
     # Help with autocomplete
     config: Configuration = ctx.obj
 
     # Check we have a valid context
     active_context_name = config.settings.default_context
-    if active_context_name is None:
+    if for_context is None and active_context_name is None:
         typer.echo("There is no active context.")
         typer.echo("Run stp context activate to set one")
         typer.echo("Or run stp login to create a new one")
         sys.exit(os.EX_NOHOST)
 
     # Check we have a URL for the context
+    if for_context is not None:
+        active_context_name = for_context
     url = config.contexts.entries.get(active_context_name).url
     if url is None:
-        typer.echo(f"No URL is defined for the active context ({active_context_name})")
+        typer.echo(f"No URL is defined for context ({active_context_name})")
         typer.echo("Run stp login to set one")
         sys.exit(os.EX_NOHOST)
 

@@ -49,6 +49,7 @@ import urllib.error
 import uuid
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union, cast, Set, Iterable
 
+import numpy as np
 import requests
 import requests.cookies
 
@@ -1056,6 +1057,7 @@ class Mongo(_DatabaseBackend):
             type: Optional[str] = None,
             query: Optional[DictMongoQuery] = None,
             include_properties: List[str] | None = None,
+            stringify_nan: bool = False,
             _api_verbose=True,
             ) -> Iterable[ComponentDocument]:
         """Queries the ST4SD Datastore (CDB) for MongoDB documents.
@@ -1084,6 +1086,7 @@ class Mongo(_DatabaseBackend):
                 columns in that DataFrame will be those specified in `include_properties`. Column names that do not
                 exist will in the DataFrame will be silently discarded. The column `input-id` will always be fetched
                 even if not specified in `include_properties`.
+            stringify_nan: A boolean flag that allows converting NaN and infinite values to strings
             _api_verbose: Set to true to print INFO level messages
 
         Raises:
@@ -1134,6 +1137,11 @@ class Mongo(_DatabaseBackend):
                                 columns.add("input-id")
                                 df = df[list(columns)]
 
+                            if stringify_nan:
+                                df.fillna('NaN', inplace=True)
+                                df.replace(np.inf, 'inf', inplace=True)
+                                df.replace(-np.inf, '-inf', inplace=True)
+
                             x['interface']['propertyTable'] = df.to_dict(orient="list")
                     except Exception as e:
                         self.log.warning(f"Unable to inject properties in {x['instance']} due to {e} - ignoring error - \n {traceback.format_exc()}")
@@ -1151,6 +1159,7 @@ class Mongo(_DatabaseBackend):
             type: Optional[str] = None,
             query: Optional[DictMongoQuery] = None,
             include_properties: List[str] | None = None,
+            stringify_nan: bool = False,
             _api_verbose=True,
             ) -> List[ComponentDocument]:
         """Queries the ST4SD Datastore (CDB) for MongoDB documents.
@@ -1179,6 +1188,7 @@ class Mongo(_DatabaseBackend):
                 columns in that DataFrame will be those specified in `include_properties`. Column names that do not
                 exist will in the DataFrame will be silently discarded. The column `input-id` will always be fetched
                 even if not specified in `include_properties`.
+            stringify_nan: A boolean flag that allows converting NaN and infinite values to strings
             _api_verbose: Set to true to print INFO level messages
 
         Raises:
@@ -1186,11 +1196,11 @@ class Mongo(_DatabaseBackend):
                 stage is not None
 
         Returns:
-            Returns an List of dictionaries created out of MongoDB documents
+            Returns a List of dictionaries created out of MongoDB documents
         """
         return list(self._kernel_getDocument(filename=filename, component=component, stage=stage, instance=instance,
                                              type=type, query=query, include_properties=include_properties,
-                                             _api_verbose=_api_verbose))
+                                             stringify_nan=stringify_nan, _api_verbose=_api_verbose))
 
     def _retry_on_pymongo_disconnect(self, func, max_disconnections=3):
         # type: (Callable[[], Any], int) -> Any
@@ -1276,7 +1286,7 @@ class Mongo(_DatabaseBackend):
         # VV: Don't handle non-string components or those which are empty; echo current values of component and stage
         if isinstance(component, string_types) is False or not component:
             return stage, component
-        
+
         str_stage, sep, comp_name = component.partition('.')
         if sep == '':
             # VV: No point in looking for a stage part if there's no `.` character at all
@@ -1651,7 +1661,7 @@ class Session:
         self._auth_cookie_name = auth_cookie_name
         self._max_request_retries = max_retries
         self._secs_between_retries = secs_between_retries
-        
+
         self._session = requests.Session()
 
         self._update_session_authentication()
@@ -1851,7 +1861,7 @@ class MongoClient(Mongo):
         self.log = logging.getLogger('MongoClient')
         if session is None:
             session = Session(None, None, None)
-        
+
         self._session: Session = session
 
     def __str__(self):
@@ -1910,6 +1920,7 @@ class MongoClient(Mongo):
             self,
             query: DictMongoQuery,
             include_properties: List[str] | None = None,
+            stringify_nan: bool = False,
             verify_tls: bool = False,
             _api_verbose:bool = True,
     ) -> List[ComponentDocument]:
@@ -1928,6 +1939,7 @@ class MongoClient(Mongo):
                 columns in that DataFrame will be those specified in `include_properties`. Column names that do not
                 exist will in the DataFrame will be silently discarded. The column `input-id` will always be fetched
                 even if not specified in `include_properties`.
+            stringify_nan: A boolean flag that allows converting NaN and infinite values to strings
             verify_tls: whether to ensure that the remote endpoint is using properly configured TLS
             _api_verbose: Set to true to print INFO level messages
 
@@ -1935,10 +1947,10 @@ class MongoClient(Mongo):
                 A list of matching MongoDocuments
         """
         url = '%s/documents/api/v1.0/query' % self._remote_mongo_url
-        params = None
+        params = {'stringifyNaN': stringify_nan}
 
         if include_properties:
-            params = {'includeProperties': ','.join([x.lower() for x in include_properties])}
+            params['includeProperties'] = ','.join([x.lower() for x in include_properties])
 
         reply = None
         try:
@@ -1969,6 +1981,7 @@ class MongoClient(Mongo):
             type: Optional[str] = None,
             query: Optional[DictMongoQuery] = None,
             include_properties: List[str] | None = None,
+            stringify_nan: bool = False,
             _api_verbose=True,
             ) -> List[ComponentDocument]:
         """Queries the ST4SD Datastore (CDB) for MongoDB documents.
@@ -1997,6 +2010,7 @@ class MongoClient(Mongo):
                 columns in that DataFrame will be those specified in `include_properties`. Column names that do not
                 exist will in the DataFrame will be silently discarded. The column `input-id` will always be fetched
                 even if not specified in `include_properties`.
+            stringify_nan: A boolean flag that allows converting NaN and infinite values to strings
             _api_verbose: Set to true to print INFO level messages
 
         Raises:
@@ -2013,7 +2027,8 @@ class MongoClient(Mongo):
                                       type=type, query=query)
 
         self.log.debug("Query dict: %s" % query)
-        return self._query_mongodb(query, include_properties=include_properties, _api_verbose=_api_verbose)
+        return self._query_mongodb(query, include_properties=include_properties, stringify_nan=stringify_nan,
+                                   _api_verbose=_api_verbose)
 
 
 class Experiment(object):
@@ -2773,7 +2788,7 @@ class ExperimentRestAPI:
         """
         url = self._session.api_path_to_url(path, endpoint or self.cc_end_point)
         response = self._session.post(url=url, json=json_payload, _api_verbose=_api_verbose, **kwargs)
-        
+
         if decode_json:
             return response.json()
         return response.text
@@ -3380,6 +3395,7 @@ class ExperimentRestAPI:
             self,
             rest_uid: str,
             include_properties: List[str] | None = None,
+            stringify_nan: bool = False,
             print_too=True,
             _api_verbose=True
     ) -> Dict[str, Any]:
@@ -3399,6 +3415,7 @@ class ExperimentRestAPI:
                 columns in that DataFrame will be those specified in `include_properties`. Column names that do not
                 exist will in the DataFrame will be silently discarded. The column `input-id` will always be fetched
                 even if not specified in `include_properties`.
+            stringify_nan: A boolean flag that allows converting NaN and infinite values to strings
             _api_verbose: if set to True this method will print info messages when retrying
 
         Returns:
@@ -3407,16 +3424,16 @@ class ExperimentRestAPI:
         Raises:
             experiment.service.errors.InvalidHTTPRequest: if HTTP status is not 200
         """
-        
-        params = None
+
+        params = {'stringifyNaN': stringify_nan}
         if include_properties:
-            params = {'includeProperties': ','.join(include_properties)}
+            params['includeProperties'] = ','.join(include_properties)
 
         status = self.api_request_get('instances/%s' % rest_uid, _api_verbose=_api_verbose, params=params)
-        
+
         if print_too:
             self.log.info("Instance %s status: %s" % (rest_uid, json.dumps(status, indent=4, sort_keys=True)))
-        
+
         return status
 
     def api_rest_uid_output(self, rest_uid, output_name, _api_verbose=False) -> Tuple[str, bytes]:
@@ -3943,6 +3960,7 @@ class ExperimentRestAPI:
             instance: str = None,
             query: Optional[DictMongoQuery] = None,
             include_properties: List[str] | None = None,
+            stringify_nan: bool = False,
             _api_verbose=True) -> List[ComponentDocument]:
         """Queries the centralized-db (CDB) for experiment MongoDB documents
 
@@ -3963,6 +3981,7 @@ class ExperimentRestAPI:
                 columns in that DataFrame will be those specified in `include_properties`. Column names that do not
                 exist will in the DataFrame will be silently discarded. The column `input-id` will always be fetched
                 even if not specified in `include_properties`.
+            stringify_nan: A boolean flag that allows converting NaN and infinite values to strings
             _api_verbose: Set to true to print INFO level messages
 
         Raises:
@@ -3981,6 +4000,7 @@ class ExperimentRestAPI:
         return self._kernel_cdb_get_document(
             query=query,
             include_properties=include_properties,
+            stringify_nan=stringify_nan,
             _api_verbose=_api_verbose)
 
     def cdb_get_document_user_metadata(
@@ -4063,6 +4083,7 @@ class ExperimentRestAPI:
     def _kernel_cdb_get_document(self,
             query: Optional[DictMongoQuery] = None,
             include_properties: List[str] | None = None,
+            stringify_nan: bool = False,
             _api_verbose: bool = True) -> List[ComponentDocument]:
         """Queries the centralized-db (CDB) for MongoDB documents.
 
@@ -4080,6 +4101,7 @@ class ExperimentRestAPI:
                 columns in that DataFrame will be those specified in `include_properties`. Column names that do not
                 exist will in the DataFrame will be silently discarded. The column `input-id` will always be fetched
                 even if not specified in `include_properties`.
+            stringify_nan: A boolean flag that allows converting NaN and infinite values to strings
             _api_verbose: Set to true to print INFO level messages
 
         Raises:
@@ -4098,7 +4120,8 @@ class ExperimentRestAPI:
 
         while True:
             try:
-                ret = self.cl.getDocument(query=query, include_properties=include_properties, _api_verbose=_api_verbose)
+                ret = self.cl.getDocument(query=query, include_properties=include_properties,
+                                          stringify_nan=stringify_nan, _api_verbose=_api_verbose)
                 if _api_verbose:
                     if ret:
                         self.log.info("Found %d matching MongoDB Documents" % len(ret))
@@ -4298,6 +4321,7 @@ class ExperimentRestAPI:
             self,
             rest_uid: str,
             include_properties: List[str] | None = None,
+            stringify_nan: bool = False,
             query: Optional[DictMongoQuery] = None,
             _api_verbose:bool = True):
         """Retrieve the `experiment` Document associated with the rest_uid that the ST4SD Runtime Service REST-API
@@ -4315,6 +4339,7 @@ class ExperimentRestAPI:
                 columns in that DataFrame will be those specified in `include_properties`. Column names that do not
                 exist will in the DataFrame will be silently discarded. The column `input-id` will always be fetched
                 even if not specified in `include_properties`.
+            stringify_nan: A boolean flag that allows converting NaN and infinite values to strings
             query: A mongo query to use for further filtering results
             _api_verbose: Set to true to print INFO level messages
 
@@ -4336,6 +4361,7 @@ class ExperimentRestAPI:
         ret = self.cdb_get_document_experiment(
             query=query,
             include_properties=include_properties,
+            stringify_nan=stringify_nan,
             _api_verbose=_api_verbose)
 
         if len(ret) == 0:
@@ -4637,7 +4663,7 @@ class ExperimentRestAPIDeprecated:
 
     def api_path_to_url(self, path, endpoint=None):
         return self._api.api_path_to_url(path=path, endpoint=endpoint)
-    
+
     def api_request_get(self, path, json_payload=None, decode_json=True, return_response=False,
                         _api_verbose=True, endpoint=None, **kwargs):
         # type: (str, Optional[Any], bool, bool, bool, str, Dict[str, Any]) -> Union[Any, str, requests.Response]

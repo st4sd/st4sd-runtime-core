@@ -1,0 +1,25 @@
+before-deploy:
+    - docker login -u $DOCKER_USERNAME -p $DOCKER_TOKEN $DOCKER_REGISTRY
+deploy:
+    # VV: For the time being, don't bother with non-x86 images
+    - docker run --rm -it
+        --env DOCKER_REGISTRY --env DOCKER_TOKEN --env DOCKER_USERNAME
+        -v `pwd`/deploy:/scripts -w /scripts --entrypoint /scripts/skopeo_copy.sh quay.io/skopeo/stable
+        ${IMAGE_BASE_URL}:${PUSH_IMAGE_TAG}-x86_64 ${IMAGE_BASE_URL}:${PUSH_IMAGE_TAG}-latest-x86_64
+    # VV: Enable experimental docker for it to work with manifests
+    # VV: We don't need this to use a manifest, just leaving it here as a reminder
+    # to re-enable multiarch builds (e.g. for ARM, PPC64LE, etc)
+
+    - export DOCKER_CLI_EXPERIMENTAL=enabled
+    - docker manifest create --amend ${IMAGE_BASE_URL}:${PUSH_IMAGE_TAG}-latest
+      ${IMAGE_BASE_URL}:${PUSH_IMAGE_TAG}-latest-x86_64
+    - docker manifest push ${IMAGE_BASE_URL}:${PUSH_IMAGE_TAG}-latest
+
+    # VV: Also copy above manifest to "${PUSH_MANIFEST_TAG}"
+    - if [ "${PUSH_LATEST_TOO}" = "yes" ]; then
+        docker run --rm -it --env DOCKER_REGISTRY --env DOCKER_TOKEN --env DOCKER_USERNAME
+        -v `pwd`/deploy:/scripts -w /scripts --entrypoint /scripts/skopeo_copy.sh quay.io/skopeo/stable
+        ${IMAGE_BASE_URL}:${PUSH_IMAGE_TAG}-latest ${IMAGE_BASE_URL}:${PUSH_MANIFEST_TAG};
+      else
+        echo Will not push latest too because PUSH_LATEST_TOO=${PUSH_LATEST_TOO};
+      fi

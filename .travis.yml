@@ -1,0 +1,214 @@
+language: python
+stages:
+    - name: test
+      if: tag is blank
+    - name: image
+      if: (branch = main AND type != pull_request) OR (tag IS present)
+    - name: multiarch
+      if: (branch = main AND type != pull_request) OR (tag IS present)
+    - name: update_image_and_wheel_versions
+      if: tag is present
+
+before_script:
+  - export GIT_ORG=$(dirname ${TRAVIS_REPO_SLUG})
+  - export GIT_REPO=$(basename ${TRAVIS_REPO_SLUG})
+  - export IMG_RUNTIME_CORE=${GIT_REPO}
+  - export DOCKER_REGISTRY=${DOCKER_REGISTRY:-quay.io}
+  - export IMAGE_NAME=${IMAGE_NAME:-/st4sd/official-base/${IMG_RUNTIME_CORE}}
+  - export IMAGE_BASE_URL="${DOCKER_REGISTRY}${IMAGE_NAME}"
+
+jobs:
+  include:
+  - python: "3.7"
+    env: TOXENV=py37-testA-ibm
+  - python: "3.7"
+    env: TOXENV=py37-testB-ibm
+  - python: "3.7"
+    env: TOXENV=py37-testC-ibm
+  - python: "3.9.15"
+    env: TOXENV=py39-testA-ibm
+  - python: "3.9.15"
+    env: TOXENV=py39-testB-ibm
+  - python: "3.9.15"
+    env: TOXENV=py39-testC-ibm
+  - python: "3.10"
+    env: TOXENV=py310-testA-ibm
+  - python: "3.10"
+    env: TOXENV=py310-testB-ibm
+  - python: "3.10"
+    env: TOXENV=py310-testC-ibm
+
+  - stage: image
+    os: linux
+    python: "3.7"
+    env:
+      - BUILD_PYTHON_VERSION=37
+    services:
+      - docker
+    script:
+      - git clone git@github.ibm.com:hartreechem/deploy.git deploy_repo
+      - cd deploy_repo
+      - tox -e py${BUILD_PYTHON_VERSION}
+      - source toxenv/bin/activate
+      - cd ..
+      - if [ ! -z "${TRAVIS_TAG}" ]; then
+          export PUSH_IMAGE_TAG="${TRAVIS_TAG}-py${BUILD_PYTHON_VERSION}";
+        else
+          export PUSH_IMAGE_TAG="py${BUILD_PYTHON_VERSION}";
+        fi
+      - if [ "${BUILD_PYTHON_VERSION}" = "37" ]; then
+          export DOCKERFILE_PATH="Dockerfile";
+          export PUSH_PIP_WHEEL_TOO=yes;
+          export BASE_LAYER=ubuntu:18.04;
+        else
+          export DOCKERFILE_PATH="py310.Dockerfile";
+          export PUSH_PIP_WHEEL_TOO=no;
+          export BASE_LAYER=ubuntu:22.04;
+        fi
+      - export IMAGE_URL="${IMAGE_BASE_URL}:${PUSH_IMAGE_TAG}-`arch`"
+      - DEPLOY_ACCESS_TOKEN=$GIT_ACCESS_TOKEN deprepo.py -p artifactory-py${BUILD_PYTHON_VERSION}-intel 
+        -o ${GIT_ORG} -r ${GIT_REPO} -d deploy/ st4sd-runtime-core-image.deploy -c --disableContexts 
+        --payload=deploy/creation_payload.json 
+        --deploymentMessage="Deployment to artifactory-py${BUILD_PYTHON_VERSION}-intel created by travis" --streamOutput
+      - cat *.log
+  - stage: image
+    os: linux
+    python: "3.10"
+    env:
+      - BUILD_PYTHON_VERSION=310
+    services:
+      - docker
+    script:
+      - git clone git@github.ibm.com:hartreechem/deploy.git deploy_repo
+      - cd deploy_repo
+      - tox -e py${BUILD_PYTHON_VERSION}
+      - source toxenv/bin/activate
+      - cd ..
+      - if [ ! -z "${TRAVIS_TAG}" ]; then
+        export PUSH_IMAGE_TAG="${TRAVIS_TAG}-py${BUILD_PYTHON_VERSION}";
+        else
+        export PUSH_IMAGE_TAG="py${BUILD_PYTHON_VERSION}";
+        fi
+      - if [ "${BUILD_PYTHON_VERSION}" = "37" ]; then
+          export DOCKERFILE_PATH="Dockerfile";
+          export PUSH_PIP_WHEEL_TOO=yes;
+          export BASE_LAYER=ubuntu:18.04;
+        else
+          export DOCKERFILE_PATH="py310.Dockerfile";
+          export PUSH_PIP_WHEEL_TOO=no;
+          export BASE_LAYER=ubuntu:22.04;
+        fi
+      - export IMAGE_URL="${IMAGE_BASE_URL}:${PUSH_IMAGE_TAG}-`arch`"
+      - DEPLOY_ACCESS_TOKEN=$GIT_ACCESS_TOKEN deprepo.py -p artifactory-py${BUILD_PYTHON_VERSION}-intel
+        -o ${GIT_ORG} -r ${GIT_REPO} -d deploy/ st4sd-runtime-core-image.deploy -c --disableContexts
+        --payload=deploy/creation_payload.json
+        --deploymentMessage="Deployment to artifactory-py${BUILD_PYTHON_VERSION}-intel created by travis" --streamOutput
+      - cat *.log
+# VV: Temporarily disabling ppc64le because of issues installing numpy and ppc64le
+#  - stage: image
+#    os: linux-ppc64le
+#    python: 3.7
+#    services:
+#      - docker
+#    script:
+#      - git clone git@github.ibm.com:hartreechem/deploy.git deploy_repo
+#      - cd deploy_repo
+#      - tox -e py37
+#      - source toxenv/bin/activate
+#      - cd ..
+#      - export GIT_ORG=$(dirname ${TRAVIS_REPO_SLUG})
+#      - export GIT_REPO=$(basename ${TRAVIS_REPO_SLUG})
+#      - export IMG_RUNTIME_CORE=${GIT_REPO}
+#      - DEPLOY_ACCESS_TOKEN=$GIT_ACCESS_TOKEN deprepo.py -p artifactory-py37-power -o ${GIT_ORG} -r ${GIT_REPO}
+#        -d deploy/ st4sd-runtime-core-image.deploy -c --disableContexts --payload=deploy/creation_payload.json
+#        --deploymentMessage="Deployment to artifactory-py37-power created by travis" --streamOutput
+#      - cat *.log
+  - stage: multiarch
+    os: linux
+    python: "3.7"
+    env:
+      - BUILD_PYTHON_VERSION=37
+    services:
+      - docker
+    script:
+      - git clone git@github.ibm.com:hartreechem/deploy.git deploy_repo
+      - cd deploy_repo
+      - tox -e py${BUILD_PYTHON_VERSION}
+      - source toxenv/bin/activate
+      - cd ..
+      - if [ ! -z "${TRAVIS_TAG}" ]; then
+          export PUSH_IMAGE_TAG="${TRAVIS_TAG}-py${BUILD_PYTHON_VERSION}";
+          export PUSH_MANIFEST_TAG="${TRAVIS_TAG}";
+        else
+          export PUSH_IMAGE_TAG="py${BUILD_PYTHON_VERSION}";
+          export PUSH_MANIFEST_TAG="latest";
+        fi
+      - export IMAGE_URL="${IMAGE_BASE_URL}:${PUSH_IMAGE_TAG}-`arch`"
+      # VV: use the py37 variant as `latest`
+      - if [ "${BUILD_PYTHON_VERSION}" = "37" ]; then
+          export PUSH_LATEST_TOO=yes;
+        else
+          export PUSH_LATEST_TOO=no;
+        fi
+      - DEPLOY_ACCESS_TOKEN=$GIT_ACCESS_TOKEN deprepo.py -p artifactory-py${BUILD_PYTHON_VERSION}-multiarch 
+        -o ${GIT_ORG} -r ${GIT_REPO} -d deploy/ st4sd-runtime-core-multiarch.deploy -c --disableContexts 
+        --payload=deploy/creation_payload.json
+        --deploymentMessage="Deployment to artifactory-py${BUILD_PYTHON_VERSION}-multiarch created by travis"
+      - cat *.log
+  - stage: multiarch
+    os: linux
+    python: "3.10"
+    env:
+      - BUILD_PYTHON_VERSION=310
+    services:
+      - docker
+    script:
+      - git clone git@github.ibm.com:hartreechem/deploy.git deploy_repo
+      - cd deploy_repo
+      - tox -e py${BUILD_PYTHON_VERSION}
+      - source toxenv/bin/activate
+      - cd ..
+      - if [ ! -z "${TRAVIS_TAG}" ]; then
+          export PUSH_IMAGE_TAG="${TRAVIS_TAG}-py${BUILD_PYTHON_VERSION}";
+          export PUSH_MANIFEST_TAG="${TRAVIS_TAG}";
+        else
+          export PUSH_IMAGE_TAG="py${BUILD_PYTHON_VERSION}";
+          export PUSH_MANIFEST_TAG="latest";
+        fi
+      - export IMAGE_URL="${IMAGE_BASE_URL}:${PUSH_IMAGE_TAG}-`arch`"
+      # VV: use the py37 variant as `latest`
+      - if [ "${BUILD_PYTHON_VERSION}" = "37" ]; then
+          export PUSH_LATEST_TOO=yes;
+        else
+          export PUSH_LATEST_TOO=no;
+        fi
+      - DEPLOY_ACCESS_TOKEN=$GIT_ACCESS_TOKEN deprepo.py -p artifactory-py${BUILD_PYTHON_VERSION}-multiarch 
+        -o ${GIT_ORG} -r ${GIT_REPO} -d deploy/ st4sd-runtime-core-multiarch.deploy -c --disableContexts 
+        --payload=deploy/creation_payload.json
+        --deploymentMessage="Deployment to artifactory-py${BUILD_PYTHON_VERSION}-multiarch created by travis"
+      - cat *.log
+
+  - stage: update_image_and_wheel_versions
+    before_install: []
+    os: linux
+    services: docker
+    python: "3.7"
+    script:
+      - git clone git@github.ibm.com:hartreechem/deploy.git deploy_repo
+      - cd deploy_repo
+      - tox -e py37
+      - source toxenv/bin/activate
+      - cd ..
+      - export PUSH_MANIFEST_TAG="${TRAVIS_TAG}"
+      - DEPLOY_ACCESS_TOKEN=$GIT_ACCESS_TOKEN deprepo.py -p artifactory-release -o ${GIT_ORG} -r ${GIT_REPO}
+        -d deploy/ st4sd-runtime-core-release-tag.deploy -c --disableContexts --payload=deploy/creation_payload.json
+        --deploymentMessage="Deployment to artifactory-release created by travis"
+      - cat *.log
+
+install:
+  # VV: Upgrade pip, virtualenv, six, and tox JUST in case
+ - pip install --upgrade pip virtualenv six tox
+script:
+ - tox -e $TOXENV
+notifications:
+  slack: ibm-research:d4pUqklOVpRT9PDqRsK9BQGd

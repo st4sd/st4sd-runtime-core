@@ -1,0 +1,4 @@
+# Numpy dropped support for python 3.7 in v1.22
+numpy < 1.22
+# Matplotlib dropped support for python 3.7 in v3.6.0
+matplotlib < 3.6.0

@@ -15,11 +15,11 @@ here = path.abspath(path.dirname(__file__))
 # Get the long description from the relevant file
 with open(path.join(here, 'README.MD'), encoding='utf-8') as f:
     long_description = f.read()
-   
+
 setup(
     name='st4sd-runtime-core',
 
-    use_scm_version = {"root": ".", "relative_to": __file__},
+    use_scm_version={"root": ".", "relative_to": __file__, "local_scheme": "no-local-version"},
     setup_requires=['setuptools_scm'],
 
     # Versions should comply with PEP440.  For a discussion on single-sourcing
@@ -57,6 +57,7 @@ setup(
         # that you indicate whether you support Python 2, Python 3 or both.
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
     ],
 
     # What does your project relate to?
@@ -72,11 +73,9 @@ setup(
     # requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
     # Notes:
-    # rx version dep. Rx movd to 3.x after 1.6.1 which introduced new API
-    # pytest-xdist: With python3 a particular unit-test fails with xdist >2. T
-    #   Issue is not resolved -> see https://github.ibm.com/hartreechem/flow/issues/1097 and linked issues
+    # rx version dep. Rx moved to 3.x after 1.6.1 which introduced new API
     install_requires=['reactivex>=4.0.0', 'pyyaml', 'pytest', 'pytest-xdist', 'pytest-timeout',
-                      'networkx', 'matplotlib<3.4.0', 'requests', 'six', 'kubernetes', 'psutil', 'boto3',
+                      'networkx', 'matplotlib', 'requests', 'six', 'kubernetes', 'psutil', 'boto3',
                       'pyrsistent', 'js2py', 'pymongo>=4.0', 'papermill', 'pandas', 'future', 'pydantic',
                       'keyring', 'typer'], #, 'pygraphviz'],
 

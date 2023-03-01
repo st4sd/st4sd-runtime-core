@@ -1,3 +1,7 @@
+# Copyright IBM Inc. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Author: Alessandro Pomponio
 from pathlib import Path
 from typing import Dict, Optional
 

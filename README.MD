@@ -9,12 +9,12 @@ Developers describe their data-flows using a YAML configuration file, which is i
 
 ST4SD-Runtime supports multiple execution-backends including Kubernetes and LSF and a single YAML file can support multiple-archs and multiple run-modes via overlays.
 
-The ST4SD-Runtime also interacts with the [ST4SD-Datastore](https://github.ibm.com/st4sd/st4sd-datastore), a database which allows querying of executed virtual-experiments and retrieval of their data.
+The ST4SD-Runtime also interacts with the [ST4SD-Datastore](https://github.com/st4sd/st4sd-datastore), a database which allows querying of executed virtual-experiments and retrieval of their data.
 
 There are three parts to the ST4SD-Runtime
 - `st4sd-runtime-core`: The core python framework (this git repository) for describing and executing virtual experiments
-- [`st4sd-runtime-k8s`](https://github.ibm.com/st4sd/st4sd-runtime-k8s): Extensions which enable to running and managing virtual-experiments on k8s clusters  
-- [`st4sd-runtime-service`](https://github.ibm.com/st4sd/st4sd-runtime-service): A RESTapi based service allowing users to add, start, stop and query virtual-experiments
+- [`st4sd-runtime-k8s`](https://github.com/st4sd/st4sd-runtime-k8s): Extensions which enable to running and managing virtual-experiments on k8s clusters  
+- [`st4sd-runtime-service`](https://github.com/st4sd/st4sd-runtime-service): A RESTapi based service allowing users to add, start, stop and query virtual-experiments
 
 ## Features
 
@@ -38,7 +38,7 @@ If you have
 1. `python3` with `virtualenv` 
 2. Have `ssh` access to  GitHub set up
 
-The following snippet will install `st4 sd-runtime-core` and run a toy-workflow on your laptop
+The following snippet will install `st4sd-runtime-core` and run a toy-workflow on your laptop
 
 ```bash
 virtualenv -p python3 $HOME/st4sd-runtime-test
@@ -50,9 +50,9 @@ elaunch.py --nostamp -l40 sum-numbers
 
 This will create a new virtualenv called `st4sd-runtime-test` at `$HOME/st4sd-runtime-test` and install `st4sd-runtime-core` into it.  It will also clone a repository into a directory called `sum-numbers` in whatever directory you run the above commands in. It will then run a toy-workflow that takes a couple of minutes to run. The toy workflow output will be in a directory called `sum-numbers.instance`
 
-You can learn more about the toy-workflow, and  workflow specification, [here.](https://github.ibm.com/st4sd/sum-numbers) 
+You can learn more about the toy-workflow, and  workflow specification, [here.](https://github.com/st4sd/sum-numbers) 
 
 ## More Information
 
-Our [documentation website](https://pages.github.ibm.com/overview) contains detailed information on installing ST4SD, 
+Our [documentation website](https://st4sd.github.io/overview) contains detailed information on installing ST4SD, 
 writing and running virtual-experiments, along with much more. 

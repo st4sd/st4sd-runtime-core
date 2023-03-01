@@ -36,8 +36,6 @@ if TYPE_CHECKING:
     from experiment.runtime.optimizer import Optimizer
 
 
-componentScheduler = reactivex.scheduler.ThreadPoolScheduler(50)
-
 moduleLogger = logging.getLogger('compstate')
 
 
@@ -115,11 +113,14 @@ class ComponentState(object):
     try to modify the state of the Component or its Engine in any way.
     '''
 
+    # VV: The poolScheduler will be instantiated by a single ComponentState, all ComponentStates use the same pool
+    componentScheduler: reactivex.scheduler.ThreadPoolScheduler | None = None
+
     def __init__(self,
                  componentSpecification: Job,
                  workflowGraph: experiment.model.graph.WorkflowGraph,
                  create_engine: bool = True):
-        '''
+        """
 
         Args:
             componentSpecification: An experiment.data.ComponentSpecification instance.
@@ -129,8 +130,16 @@ class ComponentState(object):
                 Whether to actually create the engine or not.
                 When restarting an instance from stage I we should not create engines for
                 the components in any stage K for K < I
-        '''
+        """
+        # VV: ThreadPoolGenerator.get_pool() is threadSafe, so if multiple threads call it concurrently they'll all get
+        # the same pool. GIL will then guarantee that every thread will read the same value even if multiple threads
+        # end up "updating" ComponentState.componentScheduler.
+        tpg = experiment.runtime.utilities.rx.ThreadPoolGenerator
+        if ComponentState.componentScheduler is None:
+            ComponentState.componentScheduler = tpg.get_pool(tpg.Pools.ComponentState)
+
         self._specification = componentSpecification
+
         self.controllerState = None
         self.log = logging.getLogger("wf.cs.%s" % self.specification.reference.lower())
         self.repeatingDisposable = None
@@ -212,7 +221,7 @@ class ComponentState(object):
                     op.merge(self.engine.stateUpdates),
                     op.observe_on(serialScheduler),
                     op.map(UpdateClosure(stateData, self.log, self)),
-                    op.observe_on(componentScheduler)
+                    op.observe_on(ComponentState.componentScheduler)
                 )
         else:
             #If an engine is not present we determine the state from stateDictionary
@@ -252,7 +261,7 @@ class ComponentState(object):
         check_state = experiment.runtime.utilities.rx.report_exceptions(CheckState, self.log, 'CheckState')
 
         self._state_updates: reactivex.ConnectableObservable = self._detailedState.pipe(
-            op.observe_on(componentScheduler),
+            op.observe_on(ComponentState.componentScheduler),
             op.map(StateClosure(stateData)),
             op.map(check_state),
             op.take_while(lambda x: x[1]['isAlive'] is True or len(x[0]) != 0),
@@ -577,7 +586,7 @@ class ComponentState(object):
             #won't block its emission to other subscribers
             if producerStates:
                 self.repeatingObservable = reactivex.merge(*producerStates).pipe(
-                    op.observe_on(componentScheduler),
+                    op.observe_on(ComponentState.componentScheduler),
                     op.filter(lambda x: x[0].get('isAlive') is False)
                 )
 

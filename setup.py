@@ -77,7 +77,7 @@ setup(
     #   Issue is not resolved -> see https://github.ibm.com/hartreechem/flow/issues/1097 and linked issues
     install_requires=['reactivex>=4.0.0', 'pyyaml', 'pytest', 'pytest-xdist', 'pytest-timeout',
                       'networkx', 'matplotlib<3.4.0', 'requests', 'six', 'kubernetes', 'psutil', 'boto3',
-                      'pyrsistent', 'js2py', 'pymongo>=4.0', 'papermill', 'pandas', 'future'
+                      'pyrsistent', 'js2py', 'pymongo>=4.0', 'papermill', 'pandas', 'future', 'pydantic'
                       ], #, 'pygraphviz'],
 
     # List additional groups of dependencies here (e.g. development

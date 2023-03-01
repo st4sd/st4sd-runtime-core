@@ -24,6 +24,7 @@ import os
 import sys
 import threading
 
+import experiment.settings
 import experiment.appenv
 import experiment.runtime.backends
 import experiment.model.conf
@@ -156,6 +157,10 @@ if __name__ == "__main__":
                       action="store_true",
                       metavar="REPAIR_SHADOW_DIR",
                       default=False)
+
+    # VV: Load tne environment variables that define the size of worker pools and other Orchestrator settings
+    # this may raise an exception explaining which environment-variable is invalid
+    experiment.settings.load_settings_orchestrator()
 
     #Set umask to 0002 to allow group write
     os.umask(0o002)

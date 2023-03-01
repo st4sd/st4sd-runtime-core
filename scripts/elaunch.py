@@ -37,6 +37,8 @@ import yaml
 from future.utils import raise_with_traceback
 from six import string_types
 
+
+import experiment.settings
 import experiment.appenv
 
 import experiment.test
@@ -1628,6 +1630,14 @@ if __name__ == "__main__":
                     error_description = str(initialization_error)
                 compExperiment.statusFile.setErrorDescription(error_description)
             compExperiment.statusFile.update()
+
+    # VV: Load the environment variables that define the size of worker pools and other Orchestrator settings
+    # do this after creating the instance (to preserve the error) but before initializing the components
+    if initialization_error is None:
+        try:
+            experiment.settings.load_settings_orchestrator()
+        except experiment.model.errors.EnhancedException as e:
+            initialization_error = e
 
     if initialization_error is not None or compExperiment is None:
         rootLogger.warning("Error detected, will now terminate")

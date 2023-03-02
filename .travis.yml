@@ -6,7 +6,7 @@ stages:
       if: (branch = main AND type != pull_request) OR (tag IS present)
     - name: multiarch
       if: (branch = main AND type != pull_request) OR (tag IS present)
-    - name: update_image_and_wheel_versions
+    - name: release_candidate_image
       if: tag is present
 
 before_script:
@@ -188,7 +188,7 @@ jobs:
         --deploymentMessage="Deployment to artifactory-py${BUILD_PYTHON_VERSION}-multiarch created by travis"
       - cat *.log
 
-  - stage: update_image_and_wheel_versions
+  - stage: release_candidate_image
     before_install: []
     os: linux
     services: docker

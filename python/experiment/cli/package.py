@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import keyring
 import requests
@@ -72,6 +72,9 @@ def push(
                                                     "the base package commit to the HEAD of the git repository. "
                                                     "Path must be pointing to a git repository.",
                                                is_flag=True),
+        tag: List[str] = typer.Option([], help="Tag that the experiment should have. Can be used more than once to "
+                                               "add multiple tags. "
+                                               "e.g., --tag hello --tag world"),
         update_package_definition: bool = typer.Option(False,
                                                        help="If this flag is present, any changes to "
                                                             "the package definition, such as those performed "
@@ -87,6 +90,9 @@ def push(
         origin_url = get_git_origin_url(path)
         head_commit = get_git_head_commit(path)
         pvep = update_commit_in_base_package_for_repo(pvep, origin_url, head_commit)
+
+    if len(tag) != 0:
+        pvep['metadata']['package']['tags'] = list(set(tag))
 
     try:
         result = api.api_experiment_push(pvep)
@@ -176,6 +182,9 @@ def update_definition(ctx: typer.Context,
                                                                   "of the git repository. "
                                                                   "Path must be pointing to a git repository.",
                                                              is_flag=True),
+                      tag: List[str] = typer.Option([], help="Tag that the experiment should have. Can be used "
+                                                             "more than once to add multiple tags. "
+                                                             "e.g., --tag hello --tag world"),
                       output: Optional[Path] = typer.Option(None, help="Path to output the file to. "
                                                                        "If not set, the changes will be done in place.",
                                                             writable=True, resolve_path=True)):
@@ -186,6 +195,9 @@ def update_definition(ctx: typer.Context,
         origin_url = get_git_origin_url(path)
         head_commit = get_git_head_commit(path)
         pvep = update_commit_in_base_package_for_repo(pvep, origin_url, head_commit)
+
+    if len(tag) != 0:
+        pvep['metadata']['package']['tags'] = list(set(tag))
 
     if output is not None:
         write_package_to_file(pvep, output)

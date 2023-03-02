@@ -1,0 +1,11 @@
+{
+"name": "st4sd-runtime-core",
+"hosts": "",
+"notify": {
+  "room": "G440YGC64",
+  "user": "michaelj",
+  "adapter": "slack",
+  "message_id": "unknown",
+  "thread_id": "unknown"
+}
+}

@@ -1397,7 +1397,12 @@ if __name__ == "__main__":
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGUSR1, lambda signal, frame: code.interact())
+    # VV: In LSF, when a Job exceeds the runtime limit it receives a SIGUSR2 10 minutes before it gets terminated.
+    # We want elaunch.py to treat SIGUSR2 as the user asking it to cleanly shutdown so that a user can run it as a LSF
+    # job. When elaunch.py terminates due to runtime limit then it will shut down any running jobs and wait for them
+    # to complete. At a later time, a user may restart the experiment instance via the `--restart` argument.
+    signal.signal(signal.SIGUSR2, signal_handler)
+    signal.signal(signal.SIGUSR1, lambda _signal, frame: code.interact())
 
     cmdline_args = sys.argv.copy()
 
@@ -1417,7 +1422,7 @@ if __name__ == "__main__":
         report_error(None, msg)
         raise
 
-    # VV: Flow supports the definition of default cli-arguments in a file with the format:
+    # VV: Elaunch.py supports the definition of default cli-arguments in a file with the format:
     # default-arguments:
     #  - --argumentLong: some value
     #  - -s: some value for a short-form argument
@@ -1778,7 +1783,7 @@ if __name__ == "__main__":
         LivePatcher.platform_name = options.platform or experiment.model.frontends.flowir.FlowIR.LabelDefault
         LivePatcher.custom_application_sources = extract_application_dependency_source(options)
 
-        signal.signal(signal.SIGUSR2, lambda signal, frame: live_patch_trigger())
+        signal.signal(signal.SIGALRM, lambda _signal, frame: live_patch_trigger())
 
         # VV: Right now we only have 1 variables file, but there's no reason to limit ourselves to just 1
         user_variables = {}

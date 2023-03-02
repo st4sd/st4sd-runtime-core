@@ -1,9 +1,13 @@
+# Copyright IBM Inc. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Author: Alessandro Pomponio
 from pathlib import Path
 from typing import Optional
 
 import typer
 
-import experiment.cli.exp as exp
+import experiment.cli.package as package
 import experiment.cli.context as context
 import experiment.cli.login as login
 
@@ -17,7 +21,7 @@ app.command()(login.login)
 
 # Add subcommands from different file
 app.add_typer(context.app, name="context", help="Operations such as change and deletion of contexts")
-app.add_typer(exp.app, name="experiment", help="Operations related to experiments")
+app.add_typer(package.app, name="package", help="Operations related to packages")
 
 
 @app.callback()

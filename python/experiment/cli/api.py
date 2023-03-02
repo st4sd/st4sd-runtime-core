@@ -1,3 +1,7 @@
+# Copyright IBM Inc. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Author: Alessandro Pomponio
 import os
 import sys
 
@@ -44,6 +48,8 @@ def get_api(ctx: typer.Context, for_context: str = None):
                                                       cc_auth_token=token)
     except experiment.service.errors.UnauthorisedRequest:
         typer.echo(f"Login attempt failed. Ensure the URL and the access token are correct")
+        typer.echo("Note that the credentials might have expired. You can update them with:")
+        typer.echo(f"stp login --force --context-name {active_context_name} {url}")
         sys.exit(os.EX_NOPERM)
     else:
         if config.settings.verbose:

@@ -1,3 +1,7 @@
+# Copyright IBM Inc. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Author: Alessandro Pomponio
 import os
 import sys
 
@@ -9,8 +13,8 @@ from experiment.cli.configuration import Configuration
 app = typer.Typer(no_args_is_help=True)
 
 
-@app.command()
-def list(ctx: typer.Context):
+@app.command("list")
+def list_contexts(ctx: typer.Context):
     """
     Lists available contexts
     """

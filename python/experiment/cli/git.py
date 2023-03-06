@@ -9,6 +9,18 @@ from pathlib import Path
 import typer
 
 
+def get_git_toplevel_path(path: Path):
+    try:
+        toplevel_path = subprocess.check_output(["git", "rev-parse", "--show-toplevel"],
+                                                cwd=path.parent).decode().strip()
+    except subprocess.CalledProcessError as e:
+        typer.echo("Unable to retrieve top level path for the experiment.")
+        typer.echo("Are you sure the path belongs to a git repository?")
+        sys.exit(e.returncode)
+
+    return toplevel_path
+
+
 def get_git_origin_url(path: Path):
     try:
         origin_url = subprocess.check_output(["git", "remote", "get-url", "origin"],

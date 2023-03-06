@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Author: Alessandro Pomponio
+import datetime
 import json
 import os
 import sys
@@ -16,7 +17,8 @@ from pydantic import HttpUrl, parse_obj_as, ValidationError
 
 from experiment.cli.api import get_api
 from experiment.cli.configuration import Configuration
-from experiment.cli.git import get_git_origin_url, get_git_head_commit
+from experiment.cli.git import get_git_origin_url, get_git_head_commit, get_git_toplevel_path
+from experiment.model.storage import ExperimentPackage
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -60,6 +62,12 @@ def update_commit_in_base_package_for_repo(pvep, origin_url, head_commit):
 
     return pvep
 
+
+def output_format_callback(format: str):
+    supported_formats = ['json', 'yaml', 'yml']
+    if format not in supported_formats:
+        raise typer.BadParameter(f"Output format can only be one of {supported_formats}")
+    return format
 
 @app.command()
 def push(
@@ -203,3 +211,130 @@ def update_definition(ctx: typer.Context,
         write_package_to_file(pvep, output)
     else:
         write_package_to_file(pvep, path)
+
+
+@app.command("create")
+def create_package(ctx: typer.Context,
+                   path: Path = typer.Option(Path("."),
+                                             "--from",
+                                             help="Path to the experiment configuration file or a directory "
+                                                  "that contains a standalone project",
+                                             exists=True, readable=True, resolve_path=True),
+                   manifest: Optional[Path] = typer.Option(None,
+                                                           help="Path to the file containing the manifest file",
+                                                           exists=True, readable=True, resolve_path=True,
+                                                           file_okay=True),
+                   variables_as_options: bool = typer.Option(False,
+                                                             help="Set variables in the experiment as executionOptions "
+                                                                  "instead of presets",
+                                                             is_flag=True),
+                   output_format: str = typer.Option("json",
+                                                     help="Output format to save the resulting PVEP in",
+                                                     callback=output_format_callback)
+                   ):
+    # If we're given a dir, we offer support for
+    # - standalone projects (conf/flowir_package.yaml)
+    # - flowir.conf files
+    if path.is_dir():
+        standalone_flowir_path = path / Path("conf/flowir_package.yaml")
+        flowir_conf_path = path / Path("flowir.conf")
+        if standalone_flowir_path.is_file():
+            path = standalone_flowir_path
+        elif flowir_conf_path.is_file():
+            path = flowir_conf_path
+        else:
+            typer.echo("The path provided to --from does not point to a file or to a standalone project folder")
+            sys.exit(os.EX_USAGE)
+
+    if manifest is None:
+        experiment_package: ExperimentPackage = ExperimentPackage.packageFromLocation(location=str(path))
+    else:
+        experiment_package: ExperimentPackage = ExperimentPackage.packageFromLocation(location=str(path))
+
+    #
+    pvep = {}
+
+    # Base package
+    origin_url = get_git_origin_url(path)
+    commit_id = get_git_head_commit(path)
+    toplevel_git_path = Path(get_git_toplevel_path(path))
+    name = origin_url.split("/")[-1]
+
+    pvep = {
+        "base": {
+            "packages": [
+                {
+                    "name": name,
+                    "source": {
+                        "git": {
+                            "location": {
+                                "url": origin_url,
+                                "commit": commit_id
+                            }
+                        }
+                    },
+                    "config": {
+                        "path": str(path.relative_to(toplevel_git_path)),
+                        "manifestPath": str(manifest.relative_to(toplevel_git_path) if manifest is not None else "")
+                    }
+                }
+            ],
+        }
+    }
+
+    # Metadata
+    pvep['metadata'] = {
+        "package": {
+            "name": name,
+            "tags": [],
+            "license": "",
+            "maintainer": "",
+            "description": "",
+            "keywords": []
+        }
+    }
+
+    # Parameterisation
+    raw_flowir = experiment_package.configuration.get_flowir_concrete().raw()
+    variables = raw_flowir.get("variables", {})
+    platforms = raw_flowir.get("platforms", [])
+
+    # The default platform is treated differently
+    platforms.remove("default")
+
+    # Set a preset for the platform only if there are less than two
+    parameterisation = {"presets": {}, "executionOptions": {}}
+    if len(platforms) == 0:
+        parameterisation['presets'] = {"platform": "default"}
+    elif len(platforms) == 1:
+        parameterisation['presets'] = {"platform": platforms[0]}
+    else:
+        parameterisation['executionOptions'] = {"platform": platforms}
+
+    # If some variables from the default platform are redefined in other
+    # platforms, we want to ignore them
+    vars_in_platforms = []
+    for platform in platforms:
+        vars_in_platforms.extend(list(variables.get(platform, {}).get("global", {}).keys()))
+    vars_in_platforms = set(vars_in_platforms)
+
+    # Variables not defined in the platforms go in the executionOptions
+    preset_vars = []
+    option_vars = []
+    default_vars = variables.get("default", {}).get("global", {})
+    for var_name in default_vars.keys():
+        if var_name not in vars_in_platforms:
+            if variables_as_options:
+                option_vars.append({"name": var_name, "value": default_vars[var_name]})
+            else:
+                preset_vars.append({"name": var_name, "value": default_vars[var_name]})
+
+    parameterisation['presets']['variables'] = preset_vars
+    parameterisation['executionOptions']['variables'] = option_vars
+    pvep['parameterisation'] = parameterisation
+
+    #
+    output_file = Path.cwd() / Path(f"{name}.{output_format}")
+    if output_file.exists():
+        output_file = Path.cwd() / Path(f"{name}-autogen-{datetime.datetime.now().isoformat()}.{output_format}")
+    write_package_to_file(pvep, output_file)

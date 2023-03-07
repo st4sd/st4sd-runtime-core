@@ -77,7 +77,7 @@ setup(
     install_requires=['reactivex>=4.0.0', 'pyyaml', 'pytest', 'pytest-xdist', 'pytest-timeout',
                       'networkx', 'matplotlib', 'requests', 'six', 'kubernetes', 'psutil', 'boto3',
                       'pyrsistent', 'js2py', 'pymongo>=4.0', 'papermill', 'pandas', 'future', 'pydantic',
-                      'keyring', 'typer'], #, 'pygraphviz'],
+                      'keyring', 'typer', 'jsonschema'], #, 'pygraphviz'],
 
     # List additional groups of dependencies here (e.g. development
     # dependencies). You can install these using the following syntax,
@@ -95,7 +95,8 @@ setup(
     #},
 
     package_data={
-        'experiment': ['runtime/backend_interfaces/stage-out.sh', 'rewrite-rules.json', 'resources/Template.package.tar']
+        'experiment': ['runtime/backend_interfaces/stage-out.sh', 'rewrite-rules.json', 'resources/Template.package.tar',
+                       'cli/pvep_schema.jsonschema']
     },
 
     # To provide executable scripts, use entry points in preference to the

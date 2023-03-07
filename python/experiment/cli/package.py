@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Optional, List
 
+import jsonschema
 import keyring
 import requests
 import typer
@@ -68,6 +69,7 @@ def output_format_callback(format: str):
     if format not in supported_formats:
         raise typer.BadParameter(f"Output format can only be one of {supported_formats}")
     return format
+
 
 @app.command()
 def push(
@@ -338,3 +340,34 @@ def create_package(ctx: typer.Context,
     if output_file.exists():
         output_file = Path.cwd() / Path(f"{name}-autogen-{datetime.datetime.now().isoformat()}.{output_format}")
     write_package_to_file(pvep, output_file)
+
+
+@app.command()
+def test(ctx: typer.Context,
+         path: Path = typer.Argument(...,
+                                     help="Path to the file containing the pvep",
+                                     exists=True, readable=True, resolve_path=True, file_okay=True),
+         schema_path: Optional[Path] = typer.Option(None,
+                                                    help="Path to the PVEP JSON Schema",
+                                                    exists=True, readable=True, resolve_path=True, file_okay=True),
+         ):
+    pvep = load_package_from_file(path)
+
+    if schema_path is None:
+        schema_path = Path(os.path.abspath(os.path.split(__file__)[0])) / Path("pvep_schema.jsonschema")
+        if not schema_path.is_file():
+            typer.echo("Unable to load the JSON schema file for PVEPs")
+            typer.echo("Use --schema-path to supply a valid location")
+            sys.exit(os.EX_TEMPFAIL)
+
+    with open(schema_path) as s:
+        schema = json.load(s)
+
+    try:
+        jsonschema.validate(pvep, schema)
+    except jsonschema.exceptions.ValidationError as e:
+        full_path = "instance"
+        for subpath in e.path:
+            full_path = f"{full_path}['{subpath}']"
+        typer.echo(f"Validation error in {full_path}: {e.message}")
+        sys.exit(os.EX_DATAERR)

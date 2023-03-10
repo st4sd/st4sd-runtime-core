@@ -5,7 +5,6 @@
 import datetime
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Optional, List
 
@@ -15,13 +14,18 @@ import requests
 import typer
 import yaml
 from pydantic import HttpUrl, parse_obj_as, ValidationError
+from rich.console import Console
 
 from experiment.cli.api import get_api
 from experiment.cli.configuration import Configuration
+from experiment.cli.exit_codes import STPExitCodes
 from experiment.cli.git import get_git_origin_url, get_git_head_commit, get_git_toplevel_path
 from experiment.model.storage import ExperimentPackage
 
 app = typer.Typer(no_args_is_help=True)
+
+stderr = Console(stderr=True)
+stdout = Console()
 
 
 def load_package_from_file(path: Path):
@@ -29,8 +33,8 @@ def load_package_from_file(path: Path):
         with open(path) as f:
             pvep = yaml.safe_load(f)
     except Exception as e:
-        typer.echo(e)
-        sys.exit(os.EX_TEMPFAIL)
+        stderr.print(f"Unable to load package from file: {e}")
+        typer.Exit(code=STPExitCodes.IO_ERROR)
     return pvep
 
 
@@ -51,24 +55,23 @@ def update_commit_in_base_package_for_repo(pvep, origin_url, head_commit):
         if origin_url in git_source.get("location").get("url"):
             belongs_to_repo = True
             if 'commit' not in git_source['location']:
-                typer.echo(f"The base package {base_package['name']} does not use a pinned commit")
-                sys.exit(os.EX_DATAERR)
+                stderr.print(f"The base package {base_package['name']} does not use a pinned commit")
+                raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
             git_source['location']['commit'] = head_commit
             break
 
     if not belongs_to_repo:
-        typer.echo(
-            f"The repository {origin_url} is not referenced in the base packages of the input experiment")
-        sys.exit(os.EX_USAGE)
+        stderr.print(f"The repository {origin_url} is not referenced in the base packages of the input experiment")
+        raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
 
     return pvep
 
 
-def output_format_callback(format: str):
+def output_format_callback(chosen_format: str):
     supported_formats = ['json', 'yaml', 'yml']
-    if format not in supported_formats:
+    if chosen_format not in supported_formats:
         raise typer.BadParameter(f"Output format can only be one of {supported_formats}")
-    return format
+    return chosen_format
 
 
 @app.command()
@@ -92,6 +95,14 @@ def push(
                                                             "the package file being updated",
                                                        is_flag=True)
 ):
+    """
+    Pushes a package to the registry of the currently active context.
+
+    Usage:
+    stp package push
+    [--tag <tag to add to the pvep>]
+    [--use-latest-commit] [--update-package-definition] path
+    """
     config: Configuration = ctx.obj
     api = get_api(ctx)
     pvep = load_package_from_file(path)
@@ -107,12 +118,12 @@ def push(
     try:
         result = api.api_experiment_push(pvep)
     except Exception as e:
-        typer.echo(f"Failed to push experiment: {e}")
-        sys.exit(os.EX_TEMPFAIL)
+        stderr.print(f"Failed to push experiment: {e}")
+        raise typer.Exit(code=STPExitCodes.IO_ERROR)
     else:
         if config.settings.verbose:
-            typer.echo("Experiment pushed successfully")
-            typer.echo(json.dumps(result, indent=2))
+            stdout.print("Experiment pushed successfully")
+            stdout.print(json.dumps(result, indent=2))
 
     if update_package_definition:
         write_package_to_file(pvep, path)
@@ -122,10 +133,20 @@ def push(
 def import_experiment(
         ctx: typer.Context,
         from_url: str = typer.Option(...,
-                                     help="URL to the  experiment"),
+                                     help="URL to the  experiment."
+                                          "Must be a URL to an ST4SD Registry UI entry. "
+                                          "E.g.: https://registry.st4sd.res.ibm.com/experiment/band-gap-dft-gamess-us"),
         from_context: Optional[str] = typer.Option(default=None,
-                                                   help="Optional context to use for accessing the target endpoint")
+                                                   help="Optional context to use for accessing the target endpoint."
+                                                        "Must be set if the target registry requires authorisation")
 ):
+    """
+    Imports a package from an external registry.
+
+    Usage:
+    stp package import [--from-url <url to the package in another ST4SD's Registry UI>]
+    [--from-context <context information to use in case the target registry requires authorisation>]
+    """
     config: Configuration = ctx.obj
 
     # AP: typer doesn't currently support HttpUrl as a type,
@@ -133,8 +154,8 @@ def import_experiment(
     try:
         url: HttpUrl = parse_obj_as(HttpUrl, from_url)
     except ValidationError as e:
-        typer.echo(e)
-        sys.exit(os.EX_USAGE)
+        stderr.print(f"{from_url} is not valid a valid URL: [red]{e.errors()[0].get('msg')}[/red]")
+        raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
 
     # We assume the URL to be something like
     # https://host/some/path/exp-name#an-optional-anchor
@@ -145,40 +166,42 @@ def import_experiment(
         context_url = f"{url.scheme}://{url.host}"
         token = keyring.get_password(context_url, from_context)
         if token is None:
-            typer.echo(f"Unable to get password for provided context {from_context}")
-            sys.exit(os.EX_UNAVAILABLE)
+            stderr.print(f"Unable to get password for provided context {from_context}")
+            stderr.print(f"Try to log in again with:"
+                         f" [yellow]stp login --context-name {from_context} {context_url} --force [/yellow]")
+            raise typer.Exit(STPExitCodes.UNAUTHORIZED)
         api = get_api(ctx, from_context)
         try:
             result = api.api_request_get(f"experiments/{exp_name}?outputFormat=json&hideMetadataRegistry=y&hideNone=y")
             pvep = result['entry']
         except Exception as e:
-            typer.echo(f"Unable to retrieve experiment: {e}")
-            sys.exit(os.EX_TEMPFAIL)
+            stderr.print(f"Unable to retrieve experiment: {e}")
+            raise typer.Exit(STPExitCodes.IO_ERROR)
     # With no context we assume we're accessing a publicly available registry
     else:
         try:
             exp_def_address = f"{url.scheme}://{url.host}/registry-ui/backend/experiments/{exp_name}?outputFormat=json&hideMetadataRegistry=y&hideNone=y"
             result = requests.get(exp_def_address)
             if result.status_code != 200:
-                typer.echo(f"Unable to retrieve experiment, the server returned error {result.status_code}")
-                typer.echo("If you're trying to import from a private registry, use the --from-context option")
-                typer.echo("To pass the name of the context you want to use to access the data.")
-                sys.exit(os.EX_NOPERM)
+                stderr.print(f"Unable to retrieve experiment, the server returned error {result.status_code}")
+                stderr.print("If you're trying to import from a private registry, use the --from-context option")
+                stderr.print("To pass the name of the context you want to use to access the data.")
+                raise typer.Exit(STPExitCodes.UNAUTHORIZED)
             pvep = result.json()['entry']
         except Exception as e:
-            typer.echo(f"Unable to retrieve experiment: {e}")
-            sys.exit(os.EX_TEMPFAIL)
+            stderr.print(f"Unable to retrieve experiment: {e}")
+            raise typer.Exit(code=STPExitCodes.IO_ERROR)
 
     api = get_api(ctx)
     try:
         result = api.api_experiment_push(pvep)
     except Exception as e:
-        typer.echo(f"Failed to push experiment: {e}")
-        sys.exit(os.EX_TEMPFAIL)
+        stderr.print(f"Failed to push experiment: {e}")
+        raise typer.Exit(code=STPExitCodes.IO_ERROR)
     else:
         if config.settings.verbose:
-            typer.echo("Experiment pushed successfully")
-            typer.echo(json.dumps(result, indent=2))
+            stdout.print("Experiment pushed successfully")
+            stdout.print(json.dumps(result, indent=2))
 
 
 @app.command()
@@ -198,6 +221,15 @@ def update_definition(ctx: typer.Context,
                       output: Optional[Path] = typer.Option(None, help="Path to output the file to. "
                                                                        "If not set, the changes will be done in place.",
                                                             writable=True, resolve_path=True)):
+    """
+    Updates the definition of a local PVEP.
+
+    Usage:
+    stp package update-definition <--path path-to-package>
+    [--tag <tag to set>] [--output <path-to-output-to>] [--use-latest-commit]
+
+    If --output is not specified, the update will be done in place.
+    """
     config: Configuration = ctx.obj
     pvep = load_package_from_file(path)
 
@@ -234,6 +266,17 @@ def create_package(ctx: typer.Context,
                                                      help="Output format to save the resulting PVEP in",
                                                      callback=output_format_callback)
                    ):
+    """
+    Creates a PVEP given an experiment workflow definition.
+
+    Usage:
+    stp package create <--from path-to-workflow-definition>
+    [--manifest path-to-workflow-manifest] [--output-format format-to-output-in]
+    [--variables-as-options]
+    """
+
+    config: Configuration = ctx.obj
+
     # If we're given a dir, we offer support for
     # - standalone projects (conf/flowir_package.yaml)
     # - flowir.conf files
@@ -245,16 +288,13 @@ def create_package(ctx: typer.Context,
         elif flowir_conf_path.is_file():
             path = flowir_conf_path
         else:
-            typer.echo("The path provided to --from does not point to a file or to a standalone project folder")
-            sys.exit(os.EX_USAGE)
+            stderr.print("The path provided to --from does not point to a file or to a standalone project folder")
+            raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
 
     if manifest is None:
         experiment_package: ExperimentPackage = ExperimentPackage.packageFromLocation(location=str(path))
     else:
         experiment_package: ExperimentPackage = ExperimentPackage.packageFromLocation(location=str(path))
-
-    #
-    pvep = {}
 
     # Base package
     origin_url = get_git_origin_url(path)
@@ -341,24 +381,33 @@ def create_package(ctx: typer.Context,
         output_file = Path.cwd() / Path(f"{name}-autogen-{datetime.datetime.now().isoformat()}.{output_format}")
     write_package_to_file(pvep, output_file)
 
+    if config.settings.verbose:
+        stdout.print(f"PVEP saved successfully as {output_file}")
+
 
 @app.command()
 def test(ctx: typer.Context,
          path: Path = typer.Argument(...,
-                                     help="Path to the file containing the pvep",
+                                     help="Path to the file containing the PVEP",
                                      exists=True, readable=True, resolve_path=True, file_okay=True),
          schema_path: Optional[Path] = typer.Option(None,
                                                     help="Path to the PVEP JSON Schema",
                                                     exists=True, readable=True, resolve_path=True, file_okay=True),
          ):
+    """
+    Tests the syntax of a PVEP definition.
+
+    Usage:
+    stp package test [--schema-path path-to-pvep-json-schema] <path>
+    """
     pvep = load_package_from_file(path)
 
     if schema_path is None:
         schema_path = Path(os.path.abspath(os.path.split(__file__)[0])) / Path("pvep_schema.jsonschema")
         if not schema_path.is_file():
-            typer.echo("Unable to load the JSON schema file for PVEPs")
-            typer.echo("Use --schema-path to supply a valid location")
-            sys.exit(os.EX_TEMPFAIL)
+            stderr.print("Unable to load the JSON schema file for PVEPs")
+            stderr.print("Use --schema-path to supply a valid location")
+            raise typer.Exit(code=STPExitCodes.IO_ERROR)
 
     with open(schema_path) as s:
         schema = json.load(s)
@@ -369,5 +418,5 @@ def test(ctx: typer.Context,
         full_path = "instance"
         for subpath in e.path:
             full_path = f"{full_path}['{subpath}']"
-        typer.echo(f"Validation error in {full_path}: {e.message}")
-        sys.exit(os.EX_DATAERR)
+        stderr.print(f"Validation error in {full_path}: {e.message}")
+        raise typer.Exit(code=STPExitCodes.INPUT_ERROR)

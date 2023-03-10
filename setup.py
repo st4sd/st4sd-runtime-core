@@ -77,7 +77,7 @@ setup(
     install_requires=['reactivex>=4.0.0', 'pyyaml', 'pytest', 'pytest-xdist', 'pytest-timeout',
                       'networkx', 'matplotlib', 'requests', 'six', 'kubernetes', 'psutil', 'boto3',
                       'pyrsistent', 'js2py', 'pymongo>=4.0', 'papermill', 'pandas', 'future', 'pydantic',
-                      'keyring', 'typer', 'jsonschema'], #, 'pygraphviz'],
+                      'keyring', 'typer[all]', 'jsonschema'], #, 'pygraphviz'],
 
     # List additional groups of dependencies here (e.g. development
     # dependencies). You can install these using the following syntax,

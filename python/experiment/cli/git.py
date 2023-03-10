@@ -3,10 +3,15 @@
 #
 # Author: Alessandro Pomponio
 import subprocess
-import sys
 from pathlib import Path
 
 import typer
+from rich.console import Console
+
+from experiment.cli.exit_codes import STPExitCodes
+
+stderr = Console(stderr=True)
+stdout = Console()
 
 
 def get_git_toplevel_path(path: Path):
@@ -14,9 +19,9 @@ def get_git_toplevel_path(path: Path):
         toplevel_path = subprocess.check_output(["git", "rev-parse", "--show-toplevel"],
                                                 cwd=path.parent).decode().strip()
     except subprocess.CalledProcessError as e:
-        typer.echo("Unable to retrieve top level path for the experiment.")
-        typer.echo("Are you sure the path belongs to a git repository?")
-        sys.exit(e.returncode)
+        stderr.print("Unable to retrieve top level path for the experiment via git.")
+        stderr.print("Are you sure the path belongs to a git repository?")
+        raise typer.Exit(code=STPExitCodes.GIT_ERROR)
 
     return toplevel_path
 
@@ -28,18 +33,20 @@ def get_git_origin_url(path: Path):
         if origin_url.endswith(".git"):
             origin_url = origin_url[:-4]
     except subprocess.CalledProcessError as e:
-        typer.echo("Unable to retrieve origin url for the experiment.")
-        typer.echo("Are you sure the experiment path belongs to a git repository?")
-        sys.exit(e.returncode)
+        stderr.print("Unable to retrieve origin url for the experiment via git.")
+        stderr.print("Are you sure the experiment path belongs to a git repository?")
+        raise typer.Exit(code=STPExitCodes.GIT_ERROR)
 
     return origin_url
 
 
 def get_git_head_commit(path: Path):
     try:
-        head_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=path.parent).decode().strip()
+        head_commit = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                              cwd=path.parent).decode().strip()
     except subprocess.CalledProcessError as e:
-        typer.echo("Unable to retrieve the head commit for the experiment.")
-        typer.echo("Are you sure the experiment path belongs to a git repository?")
-        sys.exit(e.returncode)
+        stderr.print("Unable to retrieve the head commit for the experiment via git.")
+        stderr.print("Are you sure the experiment path belongs to a git repository?")
+        raise typer.Exit(code=STPExitCodes.GIT_ERROR)
+
     return head_commit

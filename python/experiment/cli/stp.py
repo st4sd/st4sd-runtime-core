@@ -2,36 +2,45 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Author: Alessandro Pomponio
+
+# Hack to hide the logs for missing lsf and tinydb
+import logging
+logging.getLogger().setLevel(logging.CRITICAL)
+
 from pathlib import Path
 from typing import Optional
 
 import typer
 
-import experiment.cli.package as package
+import experiment.cli.configuration
 import experiment.cli.context as context
 import experiment.cli.login as login
-
+import experiment.cli.package as package
 from experiment.cli.configuration import Configuration
 
 #
-app = typer.Typer(no_args_is_help=True)
+app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]},
+                  no_args_is_help=True, pretty_exceptions_show_locals=False,
+                  help="stp simplifies interactions with the Simulation Toolkit for Scientific Discovery (ST4SD)")
 
 # Add single commands from different files
 app.command()(login.login)
 
 # Add subcommands from different file
-app.add_typer(context.app, name="context", help="Operations such as change and deletion of contexts")
-app.add_typer(package.app, name="package", help="Operations related to packages")
+app.add_typer(context.app, name="context",
+              help="Activate, list, or delete contexts")
+app.add_typer(package.app, name="package",
+              help="Create, update, push, import and test Parameterised Virtual Experiment Packages (PVEPs)")
 
 
 @app.callback()
 def common_options(ctx: typer.Context,
                    settings_file: Optional[Path] = typer.Option(None,
-                                                                help="Path to the stp_settings.toml file",
+                                                                help=f"Path to the {experiment.cli.configuration.DEFAULT_SETTINGS_FILE_NAME} file",
                                                                 envvar="STP_SETTINGS_FILE", exists=True, readable=True,
                                                                 resolve_path=True),
                    contexts_file: Optional[Path] = typer.Option(None,
-                                                                help="Path to the stp_contexts.toml file",
+                                                                help=f"Path to the {experiment.cli.configuration.DEFAULT_CONTEXTS_FILE_NAME} file",
                                                                 envvar="STP_CONTEXTS_FILE", exists=True, readable=True,
                                                                 resolve_path=True),
                    verbose: bool = typer.Option(False, help="Use verbose output")

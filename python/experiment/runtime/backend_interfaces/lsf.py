@@ -571,7 +571,7 @@ try:
     import pythonlsf.lsf as lsf
 except ImportError:
     lsf = None
-    print("Unable to import pythonlsf - limited LSF functionality will be available", file=sys.stderr)
+    logging.getLogger().warning("Unable to import pythonlsf - limited LSF functionality will be available")
 else:
     LSF_VERSION = float(lsf.THIS_VERSION)
 

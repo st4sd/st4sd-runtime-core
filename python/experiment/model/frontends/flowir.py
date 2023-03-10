@@ -1291,6 +1291,7 @@ class FlowIR(object):
         'local',
         'lsf',
         'kubernetes',
+        'docker'
     ]
 
     Interpreters = [
@@ -2255,6 +2256,9 @@ class FlowIR(object):
                     'cpuUnitsPerCore': None,
                     'gracePeriod': None,
                     'podSpec': None,
+                },
+                'docker': {
+                    'image': None,
                 }
             },
             'resourceRequest': {
@@ -2442,6 +2446,9 @@ class FlowIR(object):
                         key('gracePeriod'): ValidateOr(None, int, cls.is_var_reference),
                         # VV: No validation for optional field podSpec other than it should be a dictionary or None
                         key('podSpec'): is_dictionary_or_none
+                    },
+                    key('docker'): {
+                        key('image'): ValidateOr(None, string_types),
                     }
                 },
                 key('resourceRequest'): {
@@ -2992,6 +2999,30 @@ class FlowIR(object):
                 errors.append(experiment.model.errors.FlowIRInvalidComponent(
                     {}, {}, invalid, component_name, stage_index
                 ))
+
+            if backend == "docker":
+                try:
+                    image = component['resourceManager']['docker']['image']
+                except KeyError as exc:
+                    image = None
+                if image is None:
+                    missing = {'resourceManager.docker.image': 'str'}
+                    msg = f"Component uses the docker backend but does not specify a resourceManager.docker.image"
+                    errors.append(experiment.model.errors.FlowIRInvalidComponent(
+                        missing=missing, extra={}, invalid={}, componentName=component_name,
+                        stage_index=stage_index, message=msg))
+            elif backend == "kubernetes":
+                try:
+                    image = component['resourceManager']['kubernetes']['image']
+                except KeyError:
+                    image = None
+                if image is None:
+                    missing = {'resourceManager.kubernetes.image': 'str'}
+                    msg = (f"Component uses the kubernetes backend but does not specify a "
+                           f"resourceManager.kubernetes.image")
+                    errors.append(experiment.model.errors.FlowIRInvalidComponent(
+                        missing=missing, extra={}, invalid={}, componentName=component_name,
+                        stage_index=stage_index, message=msg))
 
         if component_ids is not None:
             # VV: If flowir is supplied then we can run more checks, i.e. look for references to non-existing
@@ -4084,6 +4115,9 @@ class FlowIR(object):
                     'cpuUnitsPerCore': float,
                     'gracePeriod': int,
                     'podSpec': dict,
+                },
+                'docker': {
+                    'image': str
                 }
             },
         }

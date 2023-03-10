@@ -894,6 +894,9 @@ def test_dump_instance(saltcurve_flowir, output_dir):
                                            'qos': None,
                                            'podSpec': None,
                                            },
+                            'docker': {
+                                'image': None,
+                            },
                             'lsf': {'dockerImage': None,
                                     'dockerOptions': None,
                                     'dockerProfileApp': None,

@@ -5,7 +5,9 @@
 '''Module for functions/classes relating to executors
 
 Executors are programs which launch other programs'''
+
 from __future__ import print_function
+from __future__ import annotations
 
 import logging
 import os
@@ -1123,7 +1125,7 @@ class DockerRun(Executor):
     '''Executor for docker'''
 
     @classmethod
-    def executorFromOptions(cls, target, options):
+    def executorFromOptions(cls, target, options) -> DockerRun:
 
         '''Return an executor based on options
 
@@ -1139,21 +1141,29 @@ class DockerRun(Executor):
         executor = DockerRun(target=target,
                              image=options['docker-image'],
                              mounts=[(target.environment['INSTANCE_DIR'], target.environment['INSTANCE_DIR'])],
-                             runArguments=dockerRunArgs)
+                             environment=target.environment,
+                             resolveShellSubstitutions=False,
+                             runArguments=dockerRunArgs,
+                             shell=False)
 
         moduleLogger.info("Dockerized command: %s" % executor.commandLine)
 
-    def __init__(self, target,
+        return executor
+
+    def __init__(
+            self, target,
                  image,
-                 executable="/usr/bin/docker",
+                 executable="docker",
                  arguments="",
                  mounts=[],
                  runArguments="",
                  workingDir=None,
                  shell = True,
                  resolveShellSubstitutions=True,
-                 environment=None,
-                 useCommandEnvironment=True):
+                 environment: Union[Dict[str, str], None] = None,
+                 useCommandEnvironment=True,
+                 addUser=True,
+    ):
 
         '''
         Args:
@@ -1176,15 +1186,29 @@ class DockerRun(Executor):
 
         self.image = image
         self.shell = shell
-        self.mounts= mounts
-        self.runArguments=runArguments
+        self.mounts = mounts
+
+        runArguments = [runArguments] if runArguments else []
+
+        if addUser:
+            uid = os.getuid()
+            # VV: Set the user to the local user and the group to 0 so that containers do not run as root AND
+            # those that follow OpenShift best practices just work out of the box
+            #  https://docs.openshift.com/container-platform/4.12/openshift_images/create-images.html
+            runArguments.append(f"--user {uid}:0")
+
+        if environment:
+            for name in environment:
+                runArguments.append(f"--env {name}")
+
+        self.runArguments = ' '.join(runArguments)
 
     @property
     def arguments(self):
 
-        # dockerArgs, dockerShellArgs, dockerRunArgs, instanceDir:instanceDir workingDir, image, target
-        boilerPlate = r"%s " \
-                      r"run " \
+        # dockerArgs, dockerShellArgs, dockerRunArgs, workingDir, image
+        boilerPlate = r"run " \
+                      r"%s " \
                       r"%s " \
                       r"%s " \
                       r"-t " \
@@ -1192,12 +1216,14 @@ class DockerRun(Executor):
 
         dockerShellArgs = ""
         if self.shell is True:
-            dockerShellArgs = '-e BASH_ENV=/etc/profile --entrypoint "/bin/bash"'
+            dockerShellArgs = '--entrypoint /bin/bash'
 
-        boilerPlate = boilerPlate % (self._arguments,
-                       dockerShellArgs,
-                       self.runArguments,
-                       self._workingDir)
+        boilerPlate = boilerPlate % (
+            self._arguments,
+           dockerShellArgs,
+           self.runArguments,
+           self._workingDir
+        )
 
         for mount in self.mounts:
             boilerPlate += "-v %s:%s " % tuple(mount)
@@ -1208,19 +1234,17 @@ class DockerRun(Executor):
 
     @property
     def commandLine(self):
+        args = self.arguments
 
-        if self.resolveShellSubstitutions:
-            args = self.resolveArgumentString()
-        else:
-            args = self.arguments
+        cl = "%s %s " % (self.executable, args)
 
-        cl = "%s %s" % (self.executable, args)
         if self.shell is True:
-            cl += r' -c "%s"' % self.target.commandLine
+            cl += r'-c "%s"' % self.target.commandLine
         else:
             cl += self.target.commandLine
 
         return cl
+
 
 class OpenMPIRun(Executor):
 

@@ -40,6 +40,7 @@ import experiment.runtime.backend_interfaces.localtask
 import experiment.runtime.backend_interfaces.lsf
 import experiment.runtime.backend_interfaces.k8s
 import experiment.runtime.backend_interfaces.task_simulator
+import experiment.runtime.backend_interfaces.docker
 
 
 def LocalTaskGenerator(componentSpecification,  # type: InternalRepresentationAttributes
@@ -120,6 +121,51 @@ def SimulatorTaskGenerator(componentSpecification,  # type: InternalRepresentati
 
     return process
 
+
+def DockerTaskGenerator(
+        job: experiment.model.data.ComponentSpecification,
+        outputFile: str | None = None, errorFile: str | None = None):
+
+    '''Creates a local docker task from component specification
+
+
+    Args:
+        job: Specification of the component
+        outputFile: path to hold contents of stdout
+        errorFile: path to hold contents of stderr - this is actually not used right now, kubernetes does not
+            differentiate between stdout and stderr logs
+    '''
+    log = logging.getLogger('generator.docker.%s' % job.identification.identifier.lower())
+    log.debug("Creating task for %s" % job.identification.identifier.lower())
+
+    try:
+        image = job.resourceManager['docker']['image']
+    except KeyError as exc:
+        image = None
+
+    if image is None:
+        raise experiment.model.errors.FlowIRInconsistency(
+            f"Component {job.identification.identifier} using the docker backend does not specify a "
+            f"resourceManager.docker.image or a fallback resourceManager.kubernetes.image",
+            flowir=job.configuration)
+
+    # Step1. Build the DockerRun executor, it builds a commandline that includes mounts, environment, etc
+    executor = experiment.model.executors.DockerRun.executorFromOptions(
+        job.command, options={'docker-image': image, 'docker-args': '--rm'})
+
+    #Step 2. Create the task
+    #The executor defines environment variables for all sub-executors and the task-manager (Global mode)
+    #resources: Defines resource requests and backend-specific options
+    outputFile = "out.stdout" if outputFile is None else outputFile
+    errorFile = "out.stderr" if errorFile is None else errorFile
+    outputFile = open(os.path.join(executor.workingDir, outputFile), 'wt')
+    errorFile = open(os.path.join(executor.workingDir, errorFile), 'wt')
+
+    return experiment.runtime.backend_interfaces.docker.DockerTask(
+        executor=executor,
+        stdout=outputFile,
+        stderr=errorFile,
+        shell=True)
 
 def KubernetesTaskGenerator(
         componentSpecification: experiment.model.interface.InternalRepresentationAttributes,
@@ -337,7 +383,8 @@ backendGeneratorMap = {
     'simulator': SimulatorTaskGenerator,
     'lsf': LSFTaskGenerator,
     'local': LocalTaskGenerator,
-    'kubernetes': KubernetesTaskGenerator
+    'kubernetes': KubernetesTaskGenerator,
+    'docker': DockerTaskGenerator,
 }
 
 backendInitializerMap = {

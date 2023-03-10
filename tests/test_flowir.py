@@ -689,6 +689,9 @@ def test_instantiate_flowir(salt_curve_conf):
             'dockerImage': None,
             'dockerOptions': None,
             'dockerProfileApp': None,
+        },
+        'docker': {
+            'image': None,
         }
     }
     assert comp['stage'] == 0
@@ -758,6 +761,9 @@ def test_flowir_experiment_configuration(salt_curve_whole_package):
             'dockerImage': None,
             'dockerOptions': None,
             'dockerProfileApp': None,
+        },
+        'docker': {
+            'image': None,
         }
     }
 

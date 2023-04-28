@@ -17,12 +17,14 @@ import traceback
 import weakref
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set,
                     Tuple, Union)
+from typing import cast
 
 import networkx
 import networkx.drawing.nx_agraph
 from future.utils import raise_with_traceback
 from past.builtins import cmp
 
+from collections import OrderedDict
 
 import experiment.appenv
 import experiment.model.conf
@@ -1068,6 +1070,136 @@ class ComponentSpecification(experiment.model.interface.InternalRepresentationAt
 
         return md5.hexdigest()
 
+    def dsl_component_blueprint(self) -> Dict[str, Any]:
+        """Returns the component blueprint in the DSL of st4sd.
+
+        This is a WIP method and subject to changes.
+        """
+        comp_no_platform = self.workflowGraphRef().configurationForNode(
+            self.identification.identifier, raw=True,
+            omitDefault=True, is_primitive=True)
+        comp_with_platform = self.workflowGraphRef().configurationForNode(
+            self.identification.identifier, raw=True,
+            omitDefault=False, is_primitive=True)
+
+        comp_vars = OrderedDict(comp_no_platform.get('variables', {}))
+
+        all_var_refs = experiment.model.frontends.flowir.FlowIR.discover_references_to_variables(comp_with_platform)
+        parameters = [{'name': name} for name in sorted(set(all_var_refs).difference(comp_vars))]
+
+        command = comp_with_platform.get('command', {})
+
+        # VV: In the new DSL environment is either a dictionary of key: value items OR a reference to a parameter
+        if 'environment' in command:
+            # VV: We can generate a parameter, call it "env-vars" and assign the environment to it so that
+            # callers of this component can update the environment. If the component already has such a variable
+            # then just use the entire environment as is with no way to override it.
+
+            if any(filter(lambda x: x['name'] == 'env-vars', parameters)):
+                command['environment'] = self.environment
+            else:
+                parameters.append({'name': 'env-vars', 'default': self.environment})
+                command['environment'] = "$(env-vars)s"
+
+        # VV: In the new DSL the references are auto-generated from parameters whose value follows the
+        # <producer>[/fileref]:<method> schema. Need to auto-generate parameters for references and then rewrite
+        # the instances of references in the arguments (because that's the only place that they can appear) so that
+        # they look like parameter references (i.e. %(hello)s).
+        # Use param<index of reference> for the name of the auto-generated parameter.
+        # FIXME I cannot think of a way to fully handle a :copy reference - the developer may have used information
+        # encoded in the reference (e.g. the filename that gets copied into) in the arguments.
+        top_level_folders = self.workflowGraph.configuration.top_level_folders
+        app_deps = self.workflowGraph.configuration.get_application_dependencies()
+
+        arguments: str = command.get('arguments', '')
+
+        for (i, ref) in enumerate(comp_with_platform['references']):
+            new_param = f"param{i}"
+            parameters.append({'name': new_param})
+            if not arguments:
+                continue
+
+            # VV: Completely expand reference and identify whether it's to a Component or a directory (e.g. app-dep)
+            stageIndex, jobName, filename, method = experiment.model.frontends.flowir.FlowIR.ParseDataReferenceFull(
+                ref, index=self.identification.stageIndex,special_folders=top_level_folders,
+                application_dependencies=app_deps)
+            ref = experiment.model.frontends.flowir.FlowIR.compile_reference(jobName, filename, method, stageIndex)
+
+            dref = DataReference(ref)
+            arguments = arguments.replace(dref.absoluteReference, f'%({new_param})s')
+            if dref.stageIndex == self.identification.stageIndex:
+                arguments = arguments.replace(dref.relativeReference, f'%({new_param})s')
+
+        if arguments:
+            command['arguments'] = arguments
+
+        signature=OrderedDict( (('name', self.identification.identifier), ('parameters', parameters)) )
+        dsl = OrderedDict(( ('signature', signature), ))
+
+        if comp_vars:
+            dsl['variables'] = comp_vars
+
+        dsl['command'] = command
+
+        keep = ['resourceManager', 'resourceRequest', 'workflowAttributes']
+        for x in keep:
+            if x in comp_with_platform:
+                dsl[x] = comp_with_platform[x]
+
+        return dsl
+
+    def get_dsl_args(self, workflow_param_refs: Dict[str, str]) -> Dict[str, Any]:
+        """Returns the arguments for the DSL blueprint of this component
+
+        This is the dictionary for calling the "signature" of this component.
+
+        Arguments:
+            workflow_param_refs: A dictionary whose keys are references to external paths (e.g. app-deps, inputs, etc)
+              and values are names of the workflow parameter that the reference should be translated into.
+        """
+
+        comp_no_platform = self.workflowGraphRef().configurationForNode(
+            self.identification.identifier, raw=True,
+            omitDefault=True, is_primitive=True)
+        comp_with_platform = self.workflowGraphRef().configurationForNode(
+            self.identification.identifier, raw=True,
+            omitDefault=False, is_primitive=True)
+
+        own_vars = comp_no_platform.get('variables', {})
+
+        all_var_refs = experiment.model.frontends.flowir.FlowIR.discover_references_to_variables(comp_with_platform)
+
+        # VV: All variables that are not explicitly set by the component must be arguments of the parent workflow
+        my_args = {name: f"%({name})s" for name in sorted(set(all_var_refs).difference(own_vars))}
+
+        top_level_folders = self.workflowGraph.configuration.top_level_folders
+        app_deps = self.workflowGraph.configuration.get_application_dependencies()
+
+        # VV: References are just parameters called "param<Number>"
+        for (i, ref) in enumerate(comp_with_platform['references']):
+            new_param = f"param{i}"
+            # VV: Completely expand reference and identify whether it's to a Component or a directory (e.g. app-dep)
+            stageIndex, jobName, filename, method = experiment.model.frontends.flowir.FlowIR.ParseDataReferenceFull(
+                ref, index=self.identification.stageIndex, special_folders=top_level_folders,
+                application_dependencies=app_deps)
+            ref = experiment.model.frontends.flowir.FlowIR.compile_reference(jobName, filename, method, stageIndex)
+
+            if stageIndex is not None:
+                # VV: This is a dependency to a Component, rewrite the reference to <StepName>[/fileref]:method
+                dref = DataReference(ref)
+
+                step_ref = f"<{dref.producerIdentifier.identifier}>"
+                if dref.fileRef:
+                    step_ref += "/" + dref.fileRef
+                step_ref += ":" + dref.method
+                my_args[new_param] = step_ref
+            else:
+                # VV: this is a reference to a path that is not computed by other steps (app-dep, data, input, etc)
+                # this reference will have a corresponding workflow parameter.
+                my_args[new_param] = f"%({workflow_param_refs[ref]})s"
+
+        return my_args
+
     @property
     def memoization_info(self):
         if not self._memoization_info:
@@ -1336,7 +1468,7 @@ class ComponentSpecification(experiment.model.interface.InternalRepresentationAt
         return self._identification
 
     @property
-    def workflowGraph(self) -> experiment.model.graph.WorkflowGraph:
+    def workflowGraph(self) -> WorkflowGraph:
         '''Returns the experiment.model.graph.WorkflowGraph object the receiver is part of'''
 
         return self.workflowGraphRef()
@@ -2106,6 +2238,147 @@ class WorkflowGraph(object):
             self._graph = self._createPrimitiveGraph(inherit_graph)
         else:
             self._graph = self._createCompleteGraph(inherit_graph)
+
+    def to_dsl(self):
+        """Returns the entire DSL of the Workflowgrap (entrypoint, workflows, and components)
+
+        This is a WIP method and subject to changes.
+        """
+        graph = self.graph
+
+        """
+        entrypoint: # describes how to run this YAML file
+              entry-instance: the-identifier-of-a-class
+              execute: # the same as workflow.execute with the difference that there is always 1 step
+                # and the name of the step is always <entry-instance>
+                - target: "<entry-instance>"
+                  args: # Instantiate the class
+                    parameter-name: parameter value # see notes
+        """
+        platform_vars = self._concrete.get_platform_variables()[experiment.model.frontends.flowir.FlowIR.LabelGlobal]
+        workflow = self.dsl_workflow_blueprint()
+
+        main_args = OrderedDict()
+
+        for name in sorted(platform_vars):
+            main_args[name] = platform_vars[name]
+
+        top_level_folders = self.configuration.top_level_folders
+        app_deps = self.configuration.get_application_dependencies()
+
+        # VV: References that do not point to components are parameters of workflow
+        # Those that are pointing to `input` files should also be part of entrypoint.execute.args
+        # Those that point to app-deps/data, etc should not be part of entrypoint but should have a default value
+        #   (the reference string)
+        known_param_refs = set()
+
+        # VV: Must visit references in the correct order
+        for name in sorted(graph.nodes):
+            spec: ComponentSpecification = graph.nodes[name]['componentSpecification']
+            for ref in sorted(spec.rawDataReferences):
+
+                if ref in known_param_refs:
+                    continue
+
+                stageIndex, jobName, filename, method = experiment.model.frontends.flowir.FlowIR.ParseDataReferenceFull(
+                    ref, index=spec.identification.stageIndex, special_folders=top_level_folders,
+                    application_dependencies=app_deps)
+
+                if stageIndex is not None:
+                    # VV: This is a reference that points to a component, skip it
+                    continue
+
+                num_param = len(known_param_refs)
+
+                if jobName.split("/")[0] == "input":
+                    main_args[f'param{num_param}'] = ref
+
+                known_param_refs.add(ref)
+
+        entrypoint = OrderedDict(( ('entry-instance', 'main'), ))
+        entrypoint['execute'] = [
+                {
+                    "target": "<main>",
+                    "args": main_args
+                }
+            ]
+
+        dsl = OrderedDict()
+
+        dsl['entrypoint'] = entrypoint
+        dsl['workflows'] = [workflow]
+        dsl['components'] = [
+               cast(ComponentSpecification, graph.nodes[name]['componentSpecification']).dsl_component_blueprint()
+                    for name in networkx.topological_sort(graph)
+            ]
+
+        return dsl
+
+    def dsl_workflow_blueprint(self):
+        """Returns the workflow blueprint in the DSL of st4sd.
+
+        This is a WIP method and subject to changes.
+        """
+        platform_vars = self._concrete.get_platform_variables()[experiment.model.frontends.flowir.FlowIR.LabelGlobal]
+
+        # VV: The arguments to the workflow are platform variables
+        # TODO we need a way to handle stage variables - they are basically different variables which
+        # happen to occupy the same name as the global platform variables but only for a subset of components
+        # those that belong in that certain stage index
+        parameters = [
+            {'name': name, "default": platform_vars[name]} for name in sorted(platform_vars)
+        ]
+
+        graph = self.graph
+
+        top_level_folders = self.configuration.top_level_folders
+        app_deps = self.configuration.get_application_dependencies()
+
+        # VV: References that do not point to components are parameters of workflow
+        # Those that are pointing to `input` files should also be part of entrypoint.execute.args
+        # Those that point to app-deps/data, etc should not be part of entrypoint but should have a default value
+        #   (the reference string)
+        known_param_refs = dict()
+
+        # VV: Must visit references in the correct order
+        for name in sorted(graph.nodes):
+            spec: ComponentSpecification = graph.nodes[name]['componentSpecification']
+            for ref in sorted(spec.rawDataReferences):
+
+                if ref in known_param_refs:
+                    continue
+
+                stageIndex, jobName, filename, method = experiment.model.frontends.flowir.FlowIR.ParseDataReferenceFull(
+                    ref, index=spec.identification.stageIndex, special_folders=top_level_folders,
+                    application_dependencies=app_deps)
+
+                if stageIndex is not None:
+                    # VV: This is a reference that points to a component, skip it
+                    continue
+
+                num_param = len(known_param_refs)
+                param_name = f"param{num_param}"
+
+                if jobName.split("/")[0] != "input":
+                    parameters.append({'name': param_name, 'default': ref})
+                else:
+                    parameters.append({'name': param_name})
+
+                known_param_refs[ref] = param_name
+
+        signature = OrderedDict((('name', "main"), ('parameters', parameters)))
+        workflow = OrderedDict((('signature', signature),))
+
+        workflow['steps'] = OrderedDict( ((name, name) for name in networkx.topological_sort(graph)) )
+        workflow['execute'] = [
+            {
+                'target': f"<{name}>",
+                'args': cast(ComponentSpecification, graph.nodes[name]['componentSpecification'])
+                        .get_dsl_args(known_param_refs)
+            } for name in networkx.topological_sort(graph)
+        ]
+
+        return workflow
 
     @classmethod
     def graphFromExperimentInstanceDirectory(

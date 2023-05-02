@@ -1085,21 +1085,14 @@ class ComponentSpecification(experiment.model.interface.InternalRepresentationAt
         comp_vars = OrderedDict(comp_no_platform.get('variables', {}))
 
         all_var_refs = experiment.model.frontends.flowir.FlowIR.discover_references_to_variables(comp_with_platform)
-        parameters = [{'name': name} for name in sorted(set(all_var_refs).difference(comp_vars))]
+
+        # VV: Order of parameters:
+        # 1. reference parameters
+        # 2. parameters which define values of variables (e.g. platform)
+        # 3. the env-var parameter
+        parameters = []
 
         command = comp_with_platform.get('command', {})
-
-        # VV: In the new DSL environment is either a dictionary of key: value items OR a reference to a parameter
-        if 'environment' in command:
-            # VV: We can generate a parameter, call it "env-vars" and assign the environment to it so that
-            # callers of this component can update the environment. If the component already has such a variable
-            # then just use the entire environment as is with no way to override it.
-
-            if any(filter(lambda x: x['name'] == 'env-vars', parameters)):
-                command['environment'] = self.environment
-            else:
-                parameters.append({'name': 'env-vars', 'default': self.environment})
-                command['environment'] = "$(env-vars)s"
 
         # VV: In the new DSL the references are auto-generated from parameters whose value follows the
         # <producer>[/fileref]:<method> schema. Need to auto-generate parameters for references and then rewrite
@@ -1132,6 +1125,20 @@ class ComponentSpecification(experiment.model.interface.InternalRepresentationAt
 
         if arguments:
             command['arguments'] = arguments
+
+        parameters.extend([{'name': name} for name in sorted(set(all_var_refs).difference(comp_vars))])
+
+        # VV: In the new DSL environment is either a dictionary of key: value items OR a reference to a parameter
+        if 'environment' in command:
+            # VV: We can generate a parameter, call it "env-vars" and assign the environment to it so that
+            # callers of this component can update the environment. If the component already has such a variable
+            # then just use the entire environment as is with no way to override it.
+
+            if any(filter(lambda x: x['name'] == 'env-vars', parameters)):
+                command['environment'] = self.environment
+            else:
+                parameters.append({'name': 'env-vars', 'default': self.environment})
+                command['environment'] = "$(env-vars)s"
 
         signature=OrderedDict( (('name', self.identification.identifier), ('parameters', parameters)) )
         dsl = OrderedDict(( ('signature', signature), ))
@@ -2321,14 +2328,6 @@ class WorkflowGraph(object):
         """
         platform_vars = self._concrete.get_platform_variables()[experiment.model.frontends.flowir.FlowIR.LabelGlobal]
 
-        # VV: The arguments to the workflow are platform variables
-        # TODO we need a way to handle stage variables - they are basically different variables which
-        # happen to occupy the same name as the global platform variables but only for a subset of components
-        # those that belong in that certain stage index
-        parameters = [
-            {'name': name, "default": platform_vars[name]} for name in sorted(platform_vars)
-        ]
-
         graph = self.graph
 
         top_level_folders = self.configuration.top_level_folders
@@ -2340,6 +2339,8 @@ class WorkflowGraph(object):
         #   (the reference string)
         known_param_refs = dict()
 
+        params_no_default = []
+        params_with_default = []
         # VV: Must visit references in the correct order
         for name in sorted(graph.nodes):
             spec: ComponentSpecification = graph.nodes[name]['componentSpecification']
@@ -2360,11 +2361,27 @@ class WorkflowGraph(object):
                 param_name = f"param{num_param}"
 
                 if jobName.split("/")[0] != "input":
-                    parameters.append({'name': param_name, 'default': ref})
+                    params_with_default.append({'name': param_name, 'default': ref})
                 else:
-                    parameters.append({'name': param_name})
+                    params_no_default.append({'name': param_name})
 
                 known_param_refs[ref] = param_name
+
+        # VV: The order of parameters is:
+        # 1. parameters with no default values (e.g. input files)
+        # 2. parameters with default values that are references (e.g. application-dependencies)
+        # 3. parameters with default values that are variables
+
+        parameters = []
+        parameters.extend(sorted(params_no_default, key=lambda x: x['name']))
+        parameters.extend(sorted(params_with_default, key=lambda x: x['name']))
+
+        # VV: Variables which manifest as parameters with default values should be at the bottom of the parameter list
+        # VV: The arguments to the workflow are platform variables
+        # TODO we need a way to handle stage variables - they are basically different variables which
+        # happen to occupy the same name as the global platform variables but only for a subset of components
+        # those that belong in that certain stage index
+        parameters.extend([{'name': name, "default": platform_vars[name]} for name in sorted(platform_vars)])
 
         signature = OrderedDict((('name', "main"), ('parameters', parameters)))
         workflow = OrderedDict((('signature', signature),))

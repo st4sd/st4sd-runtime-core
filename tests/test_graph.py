@@ -157,14 +157,14 @@ def test_graph_generate_new_dsl_component():
         'signature': {
             'name': 'stage0.hello',
             'parameters': [
+                {'name': 'param0'},
+                {'name': 'param1'},
                 {
                     'name': 'env-vars',
                     'default': {
                         'FOO': 'bar'
                     }
                 },
-                {'name': 'param0'},
-                {'name': 'param1'}
             ]},
         'variables': {
             'name': 'wisdom'
@@ -230,6 +230,8 @@ def test_graph_generate_new_dsl_component_platform_variables():
     }
 
     assert dsl['signature']['parameters'] == [
+        {'name': 'param0'},
+        {'name': 'param1'},
         {'name': 'from-platform'},
         {
             'name': 'env-vars',
@@ -237,8 +239,6 @@ def test_graph_generate_new_dsl_component_platform_variables():
                 'FOO': 'bar'
             }
         },
-        {'name': 'param0'},
-        {'name': 'param1'}
     ]
 
     assert dsl['variables'] == {
@@ -296,9 +296,9 @@ def test_graph_generate_new_dsl_workflow_one_component():
     assert workflow['signature'] == {
         'name': 'main',
         'parameters': [
-            {'name': 'from-platform', 'default': 'in-entrypoint'},
             {'name': 'param0', 'default': 'dataset:ref'},
             {'name': 'param1', 'default': 'fromManifest:ref'},
+            {'name': 'from-platform', 'default': 'in-entrypoint'},
         ]
     }
 
@@ -373,9 +373,9 @@ def test_graph_generate_new_dsl_workflow_two_components():
     assert workflow['signature'] == {
         'name': 'main',
         'parameters': [
-            {'name': 'from-platform', 'default': 'in-entrypoint'},
             {'name': 'param0', 'default': 'dataset:ref'},
-            {'name': 'param1', 'default': 'fromManifest:ref'}
+            {'name': 'param1', 'default': 'fromManifest:ref'},
+            {'name': 'from-platform', 'default': 'in-entrypoint'},
         ]
     }
 
@@ -443,10 +443,10 @@ def test_graph_generate_new_dsl_workflow_one_component_input_file():
     assert workflow['signature'] == {
         'name': 'main',
         'parameters': [
-            {'name': 'from-platform', 'default': 'in-entrypoint'},
+            {'name': 'param2'},
             {'name': 'param0', 'default': 'dataset:ref'},
             {'name': 'param1', 'default': 'fromManifest:ref'},
-            {'name': 'param2'}
+            {'name': 'from-platform', 'default': 'in-entrypoint'},
         ]
     }
 
@@ -520,10 +520,10 @@ def test_graph_generate_new_dsl_workflow_one_component_and_platform():
     assert workflow['signature'] == {
         'name': 'main',
         'parameters': [
-            {'name': 'another-var', 'default': 'in-entrypoint'},
-            {'name': 'from-platform', 'default': 'in-entrypoint'},
             {'name': 'param0', 'default': 'dataset:ref'},
             {'name': 'param1', 'default': 'fromManifest:ref'},
+            {'name': 'another-var', 'default': 'in-entrypoint'},
+            {'name': 'from-platform', 'default': 'in-entrypoint'},
         ]
     }
 
@@ -540,3 +540,47 @@ def test_graph_generate_new_dsl_workflow_one_component_and_platform():
                     }
                 }
             ]
+
+
+def test_graph_generate_new_dsl_workflow_one_component_param_order():
+    flowir = experiment.model.frontends.flowir.yaml_load("""
+        application-dependencies:
+          default:
+          - dataset
+        environments:
+          default:
+            my-env:
+              FOO: bar
+        
+        variables:
+          default:
+            global:
+              backend: kubernetes
+
+        components:
+        - name: hello
+          command:
+            executable: sh
+            arguments: -c "hello %(backend)s; ls -lth dataset:ref; cat input/msg.txt:ref"
+            expandArguments: "none"
+            environment: my-env
+          references:
+          - dataset:ref
+          - input/msg.txt:ref
+        """)
+    graph = experiment.model.graph.WorkflowGraph.graphFromFlowIR(flowir, {})
+
+    dsl = graph.to_dsl()
+
+    assert len(dsl['workflows']) == 1
+
+    workflow = dsl['workflows'][0]
+
+    assert workflow['signature'] == {
+        'name': 'main',
+        'parameters': [
+            {'name': 'param1'},
+            {'name': 'param0', 'default': 'dataset:ref'},
+            {'name': 'backend', 'default': 'kubernetes'}
+        ]
+    }

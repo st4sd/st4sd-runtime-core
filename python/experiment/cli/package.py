@@ -203,6 +203,11 @@ def import_experiment(
             stdout.print("Experiment pushed successfully")
             stdout.print(json.dumps(result, indent=2))
 
+    active_context_name = config.settings.default_context
+    url = config.contexts.entries.get(active_context_name).url
+    stdout.print(f"Success! You can find the imported PVEP at:")
+    stdout.print(f"{url}/registry-ui/experiment/{exp_name}")
+
 
 @app.command()
 def update_definition(ctx: typer.Context,

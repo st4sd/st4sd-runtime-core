@@ -717,3 +717,67 @@ class KubernetesConfiguration:
             kubernetes.config.load_kube_config()
 
         return kubernetes.client.CustomObjectsApi(kubernetes.client.ApiClient())
+
+
+class DockerConfiguration:
+    defaultConf: DockerConfiguration | None = None
+
+    @classmethod
+    def defaultConfiguration(
+            cls,
+            garbage_collect: str | None = None,
+    ) -> DockerConfiguration:
+        """Returns the default docker environment - required for st4sd Docker backend
+
+        Args:
+            garbage_collect: Controls how to delete Containers on task Completion.
+                Choices are "all", "failed", "successful", and (None|"none")
+
+        Exceptions:
+            Raises experiment.errors.ExperimentSetupError if the required environment cannot be configured for some
+            reason. The error object will contain further information on the underlying error
+        """
+        if cls.defaultConf is None:
+            return cls.newDefaultConfiguration(garbage_collect)
+
+        return cls.defaultConf
+
+    @classmethod
+    def newDefaultConfiguration(
+            cls,
+            garbage_collect: str | None = "none",
+    ) -> DockerConfiguration:
+        """Builds the default docker environment - required for st4sd Docker backend
+
+        Arguments:
+            garbage_collect: Controls how to delete Containers on task Completion.
+                Choices are "all", "failed", "successful", and (None|"none")
+
+        Returns
+            The default DockerConfiguration instance
+
+        Raises:
+            experiment.errors.ExperimentSetupError:  if the required environment cannot be configured for some
+                reason. The error object will contain further information on the underlying error
+        """
+        if garbage_collect is None:
+            garbage_collect = "none"
+
+        cls.defaultConf = cls(garbage_collect)
+        return cls.defaultConf
+
+    def __init__(self, garbage_collect: str | None = "none"):
+        valid_garbage_collect = ['successful', 'failed', 'all', 'none']
+        garbage_collect = garbage_collect or "none"
+
+        if garbage_collect not in valid_garbage_collect:
+            raise experiment.model.errors.ExperimentSetupError(
+                "Unable to configure Docker backend", underlyingError=KeyError(
+                    f"garbage_collect={garbage_collect} not one of {valid_garbage_collect}"),
+                instance_dir=None)
+
+        self._garbage_collect = garbage_collect
+
+    @property
+    def garbage_collect(self) -> str:
+        return self._garbage_collect

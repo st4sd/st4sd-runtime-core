@@ -94,7 +94,7 @@ def cache_lookup(image_uri):
 
 def cache_register(image_uri, resolved_image_uri):
     # type: (str, str) -> None
-    """Registers an image_uri with its fully resolved image URI, both areguments are fully expanded
+    """Registers an image_uri with its fully resolved image URI, both arguments are fully expanded
     (see expand_image_uri())
     """
 

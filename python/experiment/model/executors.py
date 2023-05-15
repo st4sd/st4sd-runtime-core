@@ -24,7 +24,14 @@ import tempfile
 import threading
 import re
 from abc import ABCMeta, abstractmethod
-from typing import Dict, Optional, Tuple, Union
+from typing import (
+    Dict,
+    Optional,
+    Tuple,
+    Union,
+    Any
+)
+
 import six
 
 import experiment.model.errors
@@ -997,8 +1004,8 @@ class Executor(Command):
         return Executor(target, **options)
 
     def __init__(self,
-                    target,
-                    executable,
+                    target: experiment.model.interface.Command,
+                    executable: str,
                     arguments=None,
                     workingDir=None,
                     environment=None,
@@ -1023,7 +1030,7 @@ class Executor(Command):
         self.target.updatePath()
 
     @property
-    def target(self):
+    def target(self) -> experiment.model.interface.Command:
 
         '''Returns the target of the executor'''
 
@@ -1095,7 +1102,7 @@ class Executor(Command):
 
         '''Returns the first defined working dir in the chain'''
 
-        #I don't this can actually be None
+        #I don't think this can actually be None
         if self._workingDir is None:
             return self.target.workingDir
         else:
@@ -1125,7 +1132,11 @@ class DockerRun(Executor):
     '''Executor for docker'''
 
     @classmethod
-    def executorFromOptions(cls, target, options) -> DockerRun:
+    def executorFromOptions(
+            cls,
+            target: experiment.model.interface.Command,
+            options: Dict[str, Any],
+    ) -> DockerRun:
 
         '''Return an executor based on options
 
@@ -1143,37 +1154,37 @@ class DockerRun(Executor):
                              mounts=[(target.environment['INSTANCE_DIR'], target.environment['INSTANCE_DIR'])],
                              environment=target.environment,
                              resolveShellSubstitutions=False,
-                             runArguments=dockerRunArgs,
-                             shell=False)
-
-        moduleLogger.info("Dockerized command: %s" % executor.commandLine)
+                             use_entrypoint=options.get('docker-use-entrypoint', False),
+                             runArguments=dockerRunArgs)
 
         return executor
 
     def __init__(
-            self, target,
-                 image,
-                 executable="docker",
-                 arguments="",
-                 mounts=[],
-                 runArguments="",
-                 workingDir=None,
-                 shell = True,
-                 resolveShellSubstitutions=True,
-                 environment: Union[Dict[str, str], None] = None,
-                 useCommandEnvironment=True,
-                 addUser=True,
+        self,
+        target,
+        image,
+        executable="docker",
+        arguments="",
+        mounts=[],
+        runArguments="",
+        workingDir=None,
+        use_entrypoint = True,
+        resolveShellSubstitutions=True,
+        environment: Union[Dict[str, str], None] = None,
+        useCommandEnvironment=True,
+        addUser=True,
     ):
 
         '''
         Args:
-           executable: Docker executable to use - defaults to /usr/bin/docker
-           arguments: Docker arguments.
-           image: Docker image
-           mounts: A list of local directories to mount as local dir:container dir
-           workingDir: The working directory for the docker process
-           shell If True the target is executed in a bash shell:
-           runArguments - Extra args to docker run
+            target: the command to run inside the container
+            executable: Docker executable to use - defaults to docker
+            arguments: Docker arguments (i.e. docker <arguments> run)
+            image: Docker image
+            mounts: A list of local directories to mount as local dir:container dir
+            workingDir: The working directory for the docker process
+            use_entrypoint: if set to True will use executable as entrypoint of container
+            runArguments: Arguments to docker run (i.e. docker run <runArguments>)
         '''
 
         super(DockerRun, self).__init__(target,
@@ -1185,8 +1196,8 @@ class DockerRun(Executor):
                             useCommandEnvironment=useCommandEnvironment)
 
         self.image = image
-        self.shell = shell
         self.mounts = mounts
+        self.use_entrypoint = use_entrypoint
 
         runArguments = [runArguments] if runArguments else []
 
@@ -1201,48 +1212,38 @@ class DockerRun(Executor):
             for name in environment:
                 runArguments.append(f"--env {name}")
 
+        if self.use_entrypoint:
+            runArguments.append(f'--entrypoint={self.target.executable}')
+
+        # VV: Ask <docker run> to allocate a pseudo-TTY
+        runArguments.append('-t')
+        runArguments.append(f'-w {self.workingDir}')
+
+        # VV: Contains arguments to `docker run` (e.g. --rm)
         self.runArguments = ' '.join(runArguments)
 
     @property
-    def arguments(self):
-
-        # dockerArgs, dockerShellArgs, dockerRunArgs, workingDir, image
-        boilerPlate = r"run " \
-                      r"%s " \
-                      r"%s " \
-                      r"%s " \
-                      r"-t " \
-                      r"-w %s "
-
-        dockerShellArgs = ""
-        if self.shell is True:
-            dockerShellArgs = '--entrypoint /bin/bash'
-
-        boilerPlate = boilerPlate % (
-            self._arguments,
-           dockerShellArgs,
-           self.runArguments,
-           self._workingDir
-        )
+    def arguments(self) -> str:
+        # VV: the format is "<dockerArguments> run <runArguments> <target command-line>"
+        args = [f"{self._arguments} run {self.runArguments}"]
 
         for mount in self.mounts:
-            boilerPlate += "-v %s:%s " % tuple(mount)
+            args.append("-v %s:%s" % tuple(mount))
 
-        boilerPlate += self.image
+        args.append(self.image)
 
-        return self._applyRewriteRule(boilerPlate)
+        if self.use_entrypoint:
+            # VV: The target executable is in --entrypoint - just use the target arguments here
+            args.append(self.target.arguments)
+        else:
+            args.append(self.target.commandLine)
+
+        return self._applyRewriteRule(' '.join(args))
 
     @property
-    def commandLine(self):
-        args = self.arguments
-
-        cl = "%s %s " % (self.executable, args)
-
-        if self.shell is True:
-            cl += r'-c "%s"' % self.target.commandLine
-        else:
-            cl += self.target.commandLine
-
+    def commandLine(self) -> str:
+        # VV: This is <docker> <run [--entrypoint] [--workdir] [-e ...]>
+        cl = f"{self.executable} {self.arguments}"
         return cl
 
 

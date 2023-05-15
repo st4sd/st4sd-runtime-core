@@ -29,7 +29,9 @@ import experiment.model.executors
 import experiment.model.frontends.flowir
 import experiment.model.interface
 import experiment.runtime.backend_interfaces.k8s
+import experiment.runtime.backend_interfaces.docker
 import experiment.runtime.errors
+import experiment.runtime.task
 
 import experiment.runtime.utilities.container_image_cache
 
@@ -46,7 +48,7 @@ def LightWeightKubernetesTaskGenerator(
         label: str | None = None,
         flowKubeEnvironment: Dict[str, Any] | None = None,
         splitArgs: bool = True,
-        pollingInterval: int = 30,
+        pollingInterval: float = 30,
         archive_path_prefix: str | None = None,
 ) -> experiment.runtime.backend_interfaces.k8s.NativeScheduledTask:
     # VV: Set resource requirements to very low, 100 Mebibytes for ram, and 1 CPU unit
@@ -88,7 +90,7 @@ def KubernetesTaskGenerator(executor,  # type:  experiment.model.executors.Comma
                             label=None,  # type:  str
                             flowKubeEnvironment=None,  # type:  Dict[str, Any]
                             splitArgs=True,  # type:  bool,
-                            pollingInterval=30,  # type: int
+                            pollingInterval: float = 30,
                             archive_path_prefix: str | None = None,
                             ):
 
@@ -115,9 +117,13 @@ def KubernetesTaskGenerator(executor,  # type:  experiment.model.executors.Comma
     k8s-persistant-volume-claim: default: ....
 
     Args:
+        executor: Command to execute
+        resourceManager: The definition of the backend that will execute the Command
+        outputFile: The path to store the stdout under
         archive_path_prefix: If k8s is configured to archive objects (appenv.KubernetesConfiguration.archive_objects)
             it generates the objects "${archive_path_prefix}pods.yaml" and "${archive_path_prefix}job.yaml".
             if archive_path_prefix is None then it defaults to "${executor.working_dir}/"
+        pollingInterval: Interval to poll status of task (in seconds)
     '''
     #The Tasks name field - generated from the label param - cannot be more than 53 chars in length to meet k8s restrictions
     #This limit is 63 chars but the Task class adds up to 10
@@ -215,8 +221,7 @@ def KubernetesTaskGenerator(executor,  # type:  experiment.model.executors.Comma
 
     return task
 
-
-class KubernetesExecutableChecker(experiment.model.interface.ExecutableChecker):
+class ContainerBasedExecutableChecker(experiment.model.interface.ExecutableChecker):
     cache = {}
     # VV: Maps expanded container URIs to the fully resolved, and expanded, image URI which is returned by
     # kubernetes, in the form of pod.status.containerStatuses.imageID. In this context, expanded means that the
@@ -259,7 +264,85 @@ class KubernetesExecutableChecker(experiment.model.interface.ExecutableChecker):
         # type: (Dict[str, str], str, str) -> str
         return cls.cache[cls.hash_command(environment, executable, image)]
 
-    def __init__(self,  resourceManager: experiment.model.frontends.flowir.DictFlowIRResourceManager):
+    def _create_task_that_checks_executable(
+            self,
+            command: experiment.model.executors.Command,
+            output_path: str,
+            stderr_path: Union[str, None] = None,
+    ) -> experiment.runtime.task.Task:
+        """Creates a task which resolves the executable and writes it to a file
+
+        Override this method
+
+        Arguments:
+            command: The command to run which will check and resolve the executable path
+            output_path: the file in which to store the stdout of task (e.g. resolved path of executable)
+            output_path: the file in which to store the stderr of task (e.g. error messages explaining the failure)
+        Return:
+             a Task
+        """
+        raise NotImplementedError("Must override this method in classes that inherit this class")
+
+    def _get_target_image(self) -> str:
+        """Returns the image that this checkExecutable will target
+
+        Override this method
+
+        Returns:
+            The image that this checkExecutable will target
+        """
+
+        raise NotImplementedError("Must override this method in classes that inherit this class")
+
+    def _set_target_image(self, img: str):
+        """Sets the image that this checkExecutable will target
+
+        Override this method
+
+        Arguments:
+            img: The container image that this executableCheck will target
+        """
+
+        raise NotImplementedError("Must override this method in classes that inherit this class")
+
+    def _explain_executable_check_failure(
+            self,
+            task: experiment.runtime.task.Task,
+            command: experiment.model.executors.Command,
+            remaining_attempts: int,
+            stdout_path: str,
+            stderr_path: Union[str, None] = None,
+    ) -> Tuple[Exception, bool]:
+        """Inspects a task to explain why it was unable to check the executable
+
+        Override this method
+
+        Arguments:
+            task: The task to inspect
+            command: The check executable command that the task ran
+            remaining_attempts: How many times this task may be retried
+            stdout_path: the path to the file that the task stored its stdout in (may not exist)
+            stderr_path: the path to the file that the task stored its stderr in (may not exist)
+
+        Returns:
+            A tuple of an exception explaining the problem and a bool for whether there should be another
+            resubmission (True) or if there is no reason to retry this task again (False)
+        """
+
+        raise NotImplementedError("Must implement this method in classes that inherit this class")
+
+    def _extract_referenced_image_ids(self, task: experiment.runtime.task.Task) -> Dict[str, str]:
+        """Maps the container images that the task used to the full container image url including a digest
+
+        Override this method
+        """
+        raise NotImplementedError("Must override this method in classes that inherit this class")
+
+
+    def __init__(
+            self,
+            resourceManager: experiment.model.frontends.flowir.DictFlowIRResourceManager
+    ):
         '''Initializes the KubernetesExecutableChecker using metadata in component.resourceManager
 
         Args
@@ -269,33 +352,38 @@ class KubernetesExecutableChecker(experiment.model.interface.ExecutableChecker):
                         - ['kubernetes']['image-pull-secret']
          '''
 
-        self.log = logging.getLogger('backends.k8scheckexe')
+        self.log = logging.getLogger('backends.containerCheckExe')
         self.resourceManager = resourceManager
+        self.resolve_image()
 
+    def resolve_image(self):
         # VV: If a previous executable check involved the referenced image, make sure to use the exact same image id
-        img = self.resourceManager['kubernetes']['image']
-        self.resourceManager['kubernetes']['image'] = experiment.runtime.utilities.container_image_cache.cache_lookup(img)
+        img = self._get_target_image()
+        img = experiment.runtime.utilities.container_image_cache.cache_lookup(img)
+        self._set_target_image(img)
 
     def _findCommand(self, command):
 
-        return experiment.model.executors.Command(executable='which',
-                                                        arguments=command._executable,
-                                                        environment=command._environment,
-                                                        resolveShellSubstitutions=False,
-                                                        resolvePath=False)
+        return experiment.model.executors.Command(
+            executable='which',
+            arguments=command._executable,
+            environment=command._environment,
+            resolveShellSubstitutions=False,
+            resolvePath=False)
 
     def _findAndResolveCommand(self, command):
 
 
         #FIXME:Set environment
 
-        return experiment.model.executors.Command(executable='sh',
-                                                        arguments='-c "readlink -f $(which %s)"' % command._executable,
-                                                        environment=command._environment,
-                                                        resolveShellSubstitutions=False,
-                                                        resolvePath=False)
+        return experiment.model.executors.Command(
+            executable='sh',
+            arguments='-c "readlink -f $(which %s)"' % command._executable,
+            environment=command._environment,
+            resolveShellSubstitutions=False,
+            resolvePath=False)
 
-    def findExecutable(self, command, resolvePath):
+    def findExecutable(self, command: experiment.model.executors.Command, resolvePath: bool) -> Union[str, None]:
 
         '''Finds the Commands executable
 
@@ -316,15 +404,12 @@ class KubernetesExecutableChecker(experiment.model.interface.ExecutableChecker):
 
         Returns:
             The updated executable path
-                '''
+        '''
 
         findCommand = self._findCommand(command) if not resolvePath else self._findAndResolveCommand(command)
 
         fd, filename = tempfile.mkstemp(dir=command.workingDir)
-        archive_path_prefix = os.path.join(command.workingDir, f"executable-check-{os.path.basename(filename)}-")
-        task = LightWeightKubernetesTaskGenerator(findCommand, resourceManager=self.resourceManager,
-                                       outputFile=filename, label='executable-check',
-                                       splitArgs=False, archive_path_prefix=archive_path_prefix)
+        task = self._create_task_that_checks_executable(findCommand, filename)
         task.wait()
 
         if task.returncode == 0:
@@ -345,8 +430,7 @@ class KubernetesExecutableChecker(experiment.model.interface.ExecutableChecker):
         return executableWithPath
 
 
-    def checkExecutable(self, command):
-        # type: ("Command") -> "experiment.runtime.backend_interfaces.k8s.NativeScheduledTask"
+    def checkExecutable(self, command: experiment.model.executors.Command) -> experiment.runtime.task.Task:
         '''Checks if the executable defined by command exists
 
         Params:
@@ -364,18 +448,13 @@ class KubernetesExecutableChecker(experiment.model.interface.ExecutableChecker):
                                                                 resolveShellSubstitutions=False,
                                                                 resolvePath=False)
         fd, filename = tempfile.mkstemp(dir=command.workingDir)
-        archive_path_prefix = os.path.join(command.workingDir, f"executable-check-{os.path.basename(filename)}-")
-        task = LightWeightKubernetesTaskGenerator(
-            checkCommand, resourceManager=self.resourceManager,
-            outputFile=filename, label='executable-check', splitArgs=False,
-            archive_path_prefix=archive_path_prefix)
+        task = self._create_task_that_checks_executable(checkCommand, filename)
         task.wait()
         os.remove(filename)
 
         if task.returncode != 0:
             msg = "Specified executable at '%s' does not exist or is not executable by user (using environment %s)" % (
-                command._executable,
-                command._environment)
+                command._executable, command._environment)
             self.log.warning(msg)
             raise ValueError(msg)
 
@@ -406,9 +485,9 @@ class KubernetesExecutableChecker(experiment.model.interface.ExecutableChecker):
         '''
         # VV: If the image has been already used before, opt for the exact same hash, else use the task that is about
         # to be spawned to cache the container image url that was used, including its hash
-        image = experiment.runtime.utilities.container_image_cache.cache_lookup(self.resourceManager['kubernetes']['image'])  # type: str
+        image = experiment.runtime.utilities.container_image_cache.cache_lookup(self._get_target_image())  # type: str
 
-        task = None  # type: Optional[experiment.runtime.backend_interfaces.k8s.NativeScheduledTask]
+        task = None  # type: Optional[experiment.runtime.task.Task]
 
         # VV: Freeze the environment and executable; use this tuple to communicate with the cache
         orig_environment = (command._environment or {}).copy()
@@ -448,67 +527,211 @@ class KubernetesExecutableChecker(experiment.model.interface.ExecutableChecker):
                     resolveShellSubstitutions=False,
                     resolvePath=False)
 
-            # VV: Sometimes k8s is quirky and drops submitted jobs. Retry up to 2 times
+            # VV: Sometimes backends can be quirky causing tasks to be dropped. Retry up to 2 times
             max_resubmission_attempts = 2
-            resubmission_attempts = max_resubmission_attempts
-
-            k8s_last_reason_failed = None
-            while resubmission_attempts > 0:
+            last_reason_failed = None
+            for resubmission_attempts in range(max_resubmission_attempts):
+                task = None
                 fd, filename = tempfile.mkstemp(dir=command.workingDir)
-                archive_path_prefix = os.path.join(command.workingDir,
-                                                   f"executable-check-{os.path.basename(filename)}-")
-                task = LightWeightKubernetesTaskGenerator(
-                    checkCommand, resourceManager=self.resourceManager,
-                    outputFile=filename, label='executable-check', splitArgs=False,
-                    pollingInterval=2.5, archive_path_prefix=archive_path_prefix,
-                )
+                fd, filename_stderr = tempfile.mkstemp(dir=command.workingDir)
+                try:
+                    task = self._create_task_that_checks_executable(checkCommand, filename)
+                    task.wait()
 
-                task.wait()
+                    if task.returncode == 0:
+                        with open(filename) as f:
+                            executablePath = f.read().strip("\n")
+                    else:
+                        executablePath = None
 
-                if task.returncode == 0:
-                    with open(filename) as f:
-                        executablePath = f.read().strip("\n")
-                else:
-                    executablePath = None
-                os.remove(filename)
+                    if task.returncode == 0 and executablePath:
+                        self.log.info("Found executable in command environment - using %s" % executablePath)
+                        last_reason_failed = None
+                        break
 
-                if task.returncode == 0:
-                    self.log.info("Found executable in command environment - using %s" % executablePath)
-                    break
-                elif task.exitReason == experiment.model.codes.exitReasons['SubmissionFailed']:
-                    resubmission_attempts -= 1
-                    this_image = self.resourceManager.get('kubernetes', {}).get('image')
-                    try:
-                        why_failed = '. '.join(task.explain_job_failure())
-                    except Exception:
-                        why_failed = 'SubmissionFailed'
+                    last_reason_failed, try_again = self._explain_executable_check_failure(
+                        task, checkCommand, max_resubmission_attempts - resubmission_attempts -1,
+                        filename, filename_stderr)
 
-                    self.log.info("Job to resolve executable %s using image %s failed to Submit due to "
-                                  "%s, will retry up to %d times" % (
-                        command._executable, this_image, why_failed, resubmission_attempts))
-
-                    k8s_last_reason_failed = ValueError(why_failed)
-                else:
-                    msg = "No executable file exists at '%s' (resolved path: %s) (using command environment %s)" % (
-                        command._executable,  executablePath, command._environment)
-                    self.log.warning(msg)
-                    raise ValueError(msg)
+                    if not try_again:
+                        break
+                except Exception as e:
+                    last_reason_failed = e
+                    continue
+                finally:
+                    os.remove(filename)
+                    os.remove(filename_stderr)
 
             if executablePath in ["", None]:
-                msg = "Job to resolve executable \"%s\" using image \"%s\" failed to Submit %d times" % (
-                      command._executable, self.resourceManager.get('kubernetes', {}).get('image'),
-                      max_resubmission_attempts)
-                raise experiment.runtime.errors.TaskSubmissionError(msg, k8s_last_reason_failed)
+                msg = "Unable to resolve executable \"%s\" using image \"%s\" failed to Submit %d times" % (
+                    command._executable, self._get_target_image(), max_resubmission_attempts)
+                raise experiment.runtime.errors.TaskSubmissionError(msg, last_reason_failed)
 
-        if task:
+        if task is not None:
             # VV: Update the image cache to include the fully-resolved-image-ids that the task used
-            referenced = task.get_referenced_image_ids()
+            referenced = self._extract_referenced_image_ids(task)
             for img in referenced:
                 experiment.runtime.utilities.container_image_cache.cache_register(img, referenced[img])
 
         # VV: Use the fully resolved image id when caching the executable path
         resolved_image = experiment.runtime.utilities.container_image_cache.cache_lookup(image)
-        KubernetesExecutableChecker.cache_command(orig_environment, orig_executable,
-                                                  image, executablePath, resolved_image)
+        self.cache_command(orig_environment, orig_executable, image, executablePath, resolved_image)
 
         return executablePath
+
+
+class KubernetesExecutableChecker(ContainerBasedExecutableChecker):
+    def _create_task_that_checks_executable(
+            self,
+            command: experiment.model.executors.Command,
+            stdout_path: str,
+            stderr_path: Union[str, None] = None,
+    ) -> experiment.runtime.backend_interfaces.k8s.NativeScheduledTask:
+        archive_path_prefix = os.path.join(command.workingDir, f"executable-check-{os.path.basename(stdout_path)}-")
+
+        return LightWeightKubernetesTaskGenerator(
+            command, resourceManager=self.resourceManager,
+            outputFile=stdout_path, label='executable-check', splitArgs=False,
+            pollingInterval=2.5, archive_path_prefix=archive_path_prefix)
+
+    def _get_target_image(self) -> str:
+        return self.resourceManager['kubernetes']['image']
+
+    def _set_target_image(self, img: str):
+        self.resourceManager['kubernetes']['image'] = img
+
+    def _explain_executable_check_failure(
+            self,
+            task: experiment.runtime.backend_interfaces.k8s.NativeScheduledTask,
+            command: experiment.model.executors.Command,
+            remaining_attempts: int,
+            stdout_path: str,
+            stderr_path: Union[str, None] = None,
+    ) -> Tuple[Exception, bool]:
+        if task.exitReason == experiment.model.codes.exitReasons['SubmissionFailed']:
+            this_image = self._get_target_image()
+            try:
+                why_failed = '. '.join(task.explain_job_failure())
+            except Exception:
+                why_failed = 'SubmissionFailed'
+
+            self.log.info("Job to resolve executable %s using image %s failed to Submit due to %s, "
+                          "will retry up to %d times" % (
+                              command._executable, this_image, why_failed, remaining_attempts))
+
+            return  ValueError(why_failed), True
+        elif task.returncode != 0:
+            msg = "Unable to check whether executable '%s' exists (using command environment %s), check executable " \
+                  "task exited with %s. Will not retry" % (
+                command._executable, command._environment, task.returncode)
+            self.log.warning(msg)
+            return ValueError(msg), False
+
+        msg = "Unable to check whether executable '%s' exists (using command environment %s), check executable " \
+              "task exited with reason %s. Will retry up to %d times" % (
+            command._executable, command._environment, task.exitReason, remaining_attempts)
+        self.log.warning(msg)
+        return ValueError(msg), True
+
+    def _extract_referenced_image_ids(
+            self,
+            task: experiment.runtime.backend_interfaces.k8s.NativeScheduledTask
+    ) -> Dict[str, str]:
+        return task.get_referenced_image_ids()
+
+
+class DockerExecutableChecker(ContainerBasedExecutableChecker):
+    def _create_task_that_checks_executable(
+            self,
+            command: experiment.model.executors.Command,
+            stdout_path: str,
+            stderr_path: Union[str, None] = None,
+    ) -> experiment.runtime.backend_interfaces.docker.DockerTask:
+        docker_opts={'docker-image': self._get_target_image(), "docker-args": "--rm", "docker-use-entrypoint": True}
+        executor = experiment.model.executors.DockerRun.executorFromOptions(command, options=docker_opts)
+
+        stderr = open(stderr_path, 'wt') if stderr_path else None
+
+        return experiment.runtime.backend_interfaces.docker.DockerTask(
+            executor, stdout=open(stdout_path, 'wt'), stderr=stderr, shell=True)
+
+    def _get_target_image(self) -> str:
+        return self.resourceManager['docker']['image']
+
+    def _set_target_image(self, img: str):
+        self.resourceManager['docker']['image'] = img
+
+    def _explain_executable_check_failure(
+            self,
+            task: experiment.runtime.backend_interfaces.docker.DockerTask,
+            command: experiment.model.executors.Command,
+            remaining_attempts: int,
+            stdout_path: str,
+            stderr_path: Union[str, None] = None,
+    ) -> Tuple[Exception, bool]:
+        stdout_contents = ""
+        stderr_contents = ""
+
+        try:
+            if os.path.exists(stderr_path):
+                with open(stderr_path, 'rt') as f:
+                    stderr_contents = f.read()
+        except Exception as e:
+            self.log.info(f"Could not get read stderr from {stderr_path} due to {e} - ignoring error")
+
+
+        try:
+            if os.path.exists(stdout_path):
+                with open(stdout_path, 'rt') as f:
+                    stdout_contents = f.read()
+        except Exception as e:
+            self.log.info(f"Could not get read stderr from {stdout_path} due to {e} - ignoring error")
+
+
+        if task.exitReason == experiment.model.codes.exitReasons['SubmissionFailed']:
+            this_image = self._get_target_image()
+            why_failed = 'SubmissionFailed'
+
+            msg = "Container to resolve executable %s using image %s failed to Submit due to %s, " \
+                  "will retry up to %d times" % (command._executable, this_image, why_failed, remaining_attempts)
+
+            if stderr_contents:
+                msg += ". Stderr contents: " + stderr_contents
+            if stdout_contents:
+                msg += ". Stdout contents: " + stdout_contents
+
+
+            self.log.info(msg)
+            return ValueError(msg), True
+        elif task.returncode != 0:
+            msg = "Unable to check whether executable '%s' exists (using command environment %s), check executable " \
+                  "task exited with %s" % (
+                      command._executable, command._environment, task.returncode)
+
+            if stderr_contents:
+                msg += ". Stderr contents: " + stderr_contents
+            if stdout_contents:
+                msg += ". Stdout contents: " + stdout_contents
+
+            msg += " - will not retry"
+
+            self.log.warning(msg)
+            return ValueError(msg), False
+
+        msg = "Unable to check whether executable '%s' exists (using command environment %s), check executable " \
+              "task exited with reason %s. Will retry up to %d times" % (
+                  command._executable, command._environment, task.exitReason, remaining_attempts)
+        if stderr_contents:
+            msg += ". Stderr contents: " + stderr_contents
+        if stdout_contents:
+            msg += ". Stdout contents: " + stdout_contents
+
+        msg += f" - will retry up to {remaining_attempts} times"
+        self.log.warning(msg)
+        return ValueError(msg), True
+
+    def _extract_referenced_image_ids(
+            self,
+            task: experiment.runtime.backend_interfaces.docker.DockerTask
+    ) -> Dict[str, str]:
+        return task.get_referenced_image_ids()

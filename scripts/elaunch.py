@@ -1265,7 +1265,8 @@ def build_parser() -> NoSystemExitOptparseOptionParser:
                                   'also required a valid --mongoEndPoint value. Default is No')
     launchOptions.add_option('--kubernetesGarbageCollect', dest='kubernetesGarbageCollect',
                              choices=["all", "failed", "successful", "none"], default=None, type="choice",
-                             help='Controls how to delete Job and Pod objects after Kubernetes task Completion.')
+                             help='Controls how to delete Job and Pod objects after Kubernetes task Completion. '
+                                  'The Docker backend also uses this option to garbage collect containers.')
     launchOptions.add_option('--kubernetesArchiveObjects', dest='kubernetesArchiveObjects',
                              choices=["all", "failed", "successful", "none"], default=None, type="choice",
                              help=' Controls how to store the Job and Pod objects after Kubernetes task Completion.')
@@ -1273,13 +1274,13 @@ def build_parser() -> NoSystemExitOptparseOptionParser:
     # we can configure --executionMode to just set --kubernetesGarbageCollect and --kubernetesArchiveObjects
     # and then only use --kubernetesArchiveObjects if it's not `None`
     launchOptions.add_option('--executionMode', dest='executionMode',
-                             choices=['production', 'development', 'debug'], type="choice", default="debug",
+                             choices=['production', 'development', 'debug'], type="choice", default="development",
                              help="Configures default options based on intended execution mode. For example, "
-                                  "'debug' configures flow to never garbage collect Kubernetes objects and always"
-                                  " archive them. "
-                                  "'development' only garbage collects kubernetes objects for successful k8s tasks and"
+                                  "'debug' never garbage collects Kubernetes/docker objects and always"
+                                  " archives them. "
+                                  "'development' garbage collects Kubernetes/docker objects of successful tasks and"
                                   " always archives them. "
-                                  "'production' garbage collects all kubernetes objects for k8s tasks and always "
+                                  "'production' garbage collects all Kubernetes/docker objects of tasks and always "
                                   "archives them. "
                                   "Any command-line options you provide override the settings configured by "
                                   "--executionMode.")

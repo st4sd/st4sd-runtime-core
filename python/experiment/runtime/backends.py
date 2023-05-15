@@ -14,6 +14,7 @@ The includes
 from __future__ import print_function
 from __future__ import annotations
 
+import subprocess
 from typing import Optional, List, Dict, cast, TYPE_CHECKING, Any
 
 import experiment.model.errors
@@ -25,6 +26,9 @@ if TYPE_CHECKING:
 import logging
 import os
 import pprint
+
+import uuid
+
 from future.utils import raise_with_traceback
 
 import experiment.appenv
@@ -151,7 +155,7 @@ def DockerTaskGenerator(
 
     # Step1. Build the DockerRun executor, it builds a commandline that includes mounts, environment, etc
     executor = experiment.model.executors.DockerRun.executorFromOptions(
-        job.command, options={'docker-image': image, 'docker-args': '--rm'})
+        job.command, options={'docker-image': image, 'docker-use-entrypoint': True})
 
     #Step 2. Create the task
     #The executor defines environment variables for all sub-executors and the task-manager (Global mode)
@@ -161,11 +165,13 @@ def DockerTaskGenerator(
     outputFile = open(os.path.join(executor.workingDir, outputFile), 'wt')
     errorFile = open(os.path.join(executor.workingDir, errorFile), 'wt')
 
+    label = job.identification.identifier.lower() + "-" + uuid.uuid4().hex[:8]
     return experiment.runtime.backend_interfaces.docker.DockerTask(
         executor=executor,
         stdout=outputFile,
         stderr=errorFile,
-        shell=True)
+        shell=True,
+        label=label)
 
 def KubernetesTaskGenerator(
         componentSpecification: experiment.model.interface.InternalRepresentationAttributes,
@@ -379,6 +385,32 @@ def KubernetesInitializer(
         with open(k8s_store_path, 'w') as f:
             experiment.model.frontends.flowir.yaml_dump(default_k8s.raw_options, f)
 
+
+def DockerInitializer(
+        workflowGraph: experiment.model.graph.WorkflowGraph,
+        k8s_garbage_collect: str | None = None,
+        **kwargs):
+    """Initialises the docker backend
+
+    Args:
+        workflowGraph: a WorkflowGraph instance (currently not used but is part of initializer protocol)
+        k8s_garbage_collect: Controls how to delete Containers on task Completion.
+            Choices are "all", "failed", "successful", and (None|"none")
+
+    Raises:
+        experiment.model.errors.ExperimentSetupError: If unable to initialize Docker backend with appropriate
+          description
+    """
+    experiment.appenv.DockerConfiguration.defaultConfiguration(garbage_collect=k8s_garbage_collect)
+
+    exit_code = subprocess.Popen("docker", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).wait()
+
+    if exit_code != 0:
+        err = ValueError(f"docker command returned exit code {exit_code}")
+        raise experiment.model.errors.ExperimentSetupError(
+            "Docker backend is unavailable", underlyingError=err, instance_dir=None)
+
+
 backendGeneratorMap = {
     'simulator': SimulatorTaskGenerator,
     'lsf': LSFTaskGenerator,
@@ -390,13 +422,15 @@ backendGeneratorMap = {
 backendInitializerMap = {
     'lsf': LSFInitializer,
     'kubernetes': KubernetesInitializer,
+    'docker': DockerInitializer,
 }
 
 backendTaskMap = {
     'simulator': experiment.runtime.backend_interfaces.task_simulator.SimulatorTask,
     'lsf': experiment.runtime.backend_interfaces.lsf.Task,
     'local': experiment.runtime.backend_interfaces.localtask.LocalTask,
-    'kubernetes': experiment.runtime.backend_interfaces.k8s.NativeScheduledTask
+    'kubernetes': experiment.runtime.backend_interfaces.k8s.NativeScheduledTask,
+    'docker': experiment.runtime.backend_interfaces.docker.DockerTask,
 }
 
 

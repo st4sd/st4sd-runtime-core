@@ -1525,10 +1525,15 @@ class ComponentSpecification(experiment.model.interface.InternalRepresentationAt
         rootLocation = None if rootStorage is None else rootStorage.location
 
         #TODO: Possibly should be moved
-        if self.resourceManager['config']['backend'] != 'kubernetes':
+        backend_type = self.resourceManager['config']['backend']
+        if backend_type not in ['kubernetes', 'docker']:
             executableChecker = experiment.model.executors.LocalExecutableChecker()
+        elif backend_type == 'kubernetes':
+            executableChecker = experiment.runtime.backends_base.KubernetesExecutableChecker(
+                resourceManager=self.resourceManager)
         else:
-            executableChecker = experiment.runtime.backends_base.KubernetesExecutableChecker(resourceManager=self.resourceManager)
+            executableChecker = experiment.runtime.backends_base.DockerExecutableChecker(
+                resourceManager=self.resourceManager)
 
         #Do not attempt to find pathless executables here.
         #The default is to assuming pathless executable will be found in the environment and only check if explicitly asked
@@ -1924,14 +1929,15 @@ class ComponentSpecification(experiment.model.interface.InternalRepresentationAt
                     graphLogger.log(19, 'Updating executable of %s to %s' % (self.identification.identifier, postCheck))
                     self.setOption('#command.executable', postCheck)
 
-                if updateSpecification and (self.resourceManager['config']['backend'] == 'kubernetes'):
-                    img_original = self.resourceManager['kubernetes']['image']
+                if updateSpecification and (self.resourceManager['config']['backend'] in ['kubernetes', 'docker']):
+                    backend_type = self.resourceManager['config']['backend']
+                    img_original = self.resourceManager[backend_type]['image']
                     img_snapshot = experiment.runtime.utilities.container_image_cache.cache_lookup(img_original)
 
                     if img_original != img_snapshot:
-                        graphLogger.log(19, 'Updating kubernetes image of %s to %s' % (
-                            self.identification.identifier, img_snapshot))
-                        self.setOption('#resourceManager.kubernetes.image', img_snapshot)
+                        graphLogger.log(19, 'Updating %s image of %s to %s' % (
+                            backend_type, self.identification.identifier, img_snapshot))
+                        self.setOption(f'#resourceManager.{backend_type}.image', img_snapshot)
             except Exception as e:
                 if ignoreTestExecutablesError:
                     msg = "Check executable found an issue with executable %s, component: %s, environment id: %s=%s -" \

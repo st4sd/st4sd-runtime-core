@@ -57,24 +57,25 @@ class LocalTask(subprocess.Popen, experiment.runtime.task.Task):
             idx = self.schedulingData.indexOfColumnWithHeader(key)
             self.schedulingData.matrix[0][idx] = epoch_submitted
 
+        threading.Thread(target=self._wait_task_and_set_epoch_finished).start()
+
+    def _wait_task_and_set_epoch_finished(self):
+        """Internal method that waits for task to finish and then sets epoch-finished
+
+        You inherit localTask and override this method to add your custom logic for waiting the task to complete
+        """
         # VV: Ensure that epoch-finished is reflected to the caller of self.wait() after they wake-up
-        def measure_execution_time():
-            try:
-                subprocess.Popen.wait(self)
-            except:
-                self.log.critical("Failed to wait for termination of local task %s."
-                                  " EXCEPTION: %s\n" % (
-                    self.args, traceback.format_exc()
-                ))
-            self._z_finished_date = datetime.datetime.now()
+        try:
+            subprocess.Popen.wait(self)
+        except Exception as e:
+            self.log.warning("Failed to wait for termination of local task %s due to %s" % (self.args, e))
+        self._z_finished_date = datetime.datetime.now()
 
-            idx = self.schedulingData.indexOfColumnWithHeader('epoch-finished')
-            self.schedulingData.matrix[0][idx] = self._z_finished_date.strftime("%d%m%y-%H%M%S")
+        idx = self.schedulingData.indexOfColumnWithHeader('epoch-finished')
+        self.schedulingData.matrix[0][idx] = self._z_finished_date.strftime("%d%m%y-%H%M%S")
 
-            # VV: Wake up whoever is blocked at .wait()
-            self._z_wait_event.set()
-
-        threading.Thread(target=measure_execution_time).start()
+        # VV: Wake up whoever is blocked at .wait()
+        self._z_wait_event.set()
 
     def isAlive(self):
 

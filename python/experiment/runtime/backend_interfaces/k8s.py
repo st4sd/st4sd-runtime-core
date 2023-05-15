@@ -275,7 +275,7 @@ class NativeScheduledTask(experiment.runtime.task.Task):
                  stderr=sys.stderr,
                  splitArgs=True,
                  cacheImage=True,
-                 pollingInterval=30,
+                 pollingInterval: float = 30,
                  archive_path_prefix: str | None = None,
                  garbage_collect: str | None = "none",
                  archive_objects: str | None = "none",
@@ -370,7 +370,7 @@ class NativeScheduledTask(experiment.runtime.task.Task):
             cacheImage: If True if the task finishes successfully the image name so if a
                 subsequent Task uses the same image it will only be pulled 'IfNotPresent' regardless of label e.g.
                 'latest'
-            pollingInterval: In miliseconds
+            pollingInterval: Interval to poll status of task (in seconds)
             archive_path_prefix: If k8s is configured to archive objects
                 (appenv.KubernetesConfiguration.archive_objects)
                 it generates the objects "${archive_path_prefix}pods.yaml" and "${archive_path_prefix}job.yaml".

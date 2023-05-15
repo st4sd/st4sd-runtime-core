@@ -21,12 +21,19 @@ import experiment.model.executors
 import experiment.runtime.backend_interfaces.localtask
 
 
+class FailedToPull(ValueError):
+    pass
+
+
 class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
     def __init__(
         self, executor: experiment.model.executors.DockerRun,
-        stdout=sys.stdout, stderr=sys.stderr, shell: bool = False,
+        stdout=sys.stdout, stderr=sys.stderr,
+        pull_policy: str = 'Always',
+        shell: bool = False,
         label: Optional[str] = None, **kwargs
     ):
+        log = logging.getLogger('docker')
         self.executor = executor
         if not label:
             self._name = f"st4sd-{uuid.uuid1()}"
@@ -35,9 +42,17 @@ class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
 
         self.executor.runArguments += f" --name={self._name}"
 
+        valid_pull_policies = ['Always', 'Never', 'IfNotPresent']
+        if pull_policy not in valid_pull_policies:
+            raise ValueError(f"ImagePullPolicy {pull_policy} is not one of {valid_pull_policies}")
+
+        self.pull_policy = pull_policy
+
+        if pull_policy == 'Always' or pull_policy == 'IfNotPresent':
+            self.may_pull_image(log)
+
         # VV: this is initialized by experiment.runtime.backends.InitialiseBackendsForWorkflow()
         config = experiment.appenv.DockerConfiguration.defaultConf
-        log = logging.getLogger('docker')
         if config and config.garbage_collect == "all" and '--rm' not in self.executor.runArguments:
 
             log.log(15, f"Will auto delete {self._name} because dockerConf.garbage_collect=all")
@@ -49,6 +64,34 @@ class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
 
         self.log = log
         self.log.log(15, "Dockerized command: %s" % self.executor.commandLine)
+
+    def may_pull_image(self, log: logging.Logger):
+        if_not_present = (self.pull_policy=='IfNotPresent')
+        do_pull = not if_not_present
+
+        if if_not_present:
+            do_pull = self.executor.image not in self.get_referenced_image_ids()
+
+        if not do_pull:
+            return
+
+        try:
+            log.info(f"Pulling image {self.executor.image}")
+            start = datetime.datetime.now()
+            pull = subprocess.Popen(
+                f"{self.executor.executable} pull {self.executor.image}",
+                shell=True, stderr=subprocess.PIPE)
+            pull_code = pull.wait()
+            if pull_code != 0:
+                raise FailedToPull(
+                    f"Failed to pull {self.executor.image} with exit-code {pull_code}. stderr follows: "
+                    f"{pull.stderr.read()}")
+            dt = datetime.datetime.now() - start
+            log.info(f"Finished pulling image {self.executor.image} in {dt}")
+        except FailedToPull:
+            raise
+        except Exception as e:
+            raise ValueError(f"Failed to pull {self.executor.image} due to {e}")
 
     def _wait_task_and_set_epoch_finished(self):
         # VV: Ensure that epoch-finished is reflected to the caller of self.wait() after they wake-up
@@ -100,7 +143,8 @@ class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
                 return {image:  docker_inspect[0]["RepoDigests"][0]}
         except Exception as e:
             self.log.info(f"Could not resolve image {image} because of {e} - ignoring exception")
-            return {}
+
+        return {}
 
     @property
     def schedulerId(self):

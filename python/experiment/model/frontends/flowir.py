@@ -2259,6 +2259,7 @@ class FlowIR(object):
                 },
                 'docker': {
                     'image': None,
+                    'imagePullPolicy': 'Always',
                 }
             },
             'resourceRequest': {
@@ -2449,6 +2450,8 @@ class FlowIR(object):
                     },
                     key('docker'): {
                         key('image'): ValidateOr(None, string_types),
+                        key('imagePullPolicy'): ValidateOr(None, cls.is_var_reference,
+                                                           'Always', 'Never', 'IfNotPresent'),
                     }
                 },
                 key('resourceRequest'): {

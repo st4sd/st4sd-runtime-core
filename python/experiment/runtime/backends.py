@@ -171,7 +171,8 @@ def DockerTaskGenerator(
         stdout=outputFile,
         stderr=errorFile,
         shell=True,
-        label=label)
+        label=label,
+        pull_policy=job.resourceManager['docker']['imagePullPolicy'])
 
 def KubernetesTaskGenerator(
         componentSpecification: experiment.model.interface.InternalRepresentationAttributes,

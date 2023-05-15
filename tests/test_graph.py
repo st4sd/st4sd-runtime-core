@@ -188,7 +188,8 @@ def test_graph_generate_new_dsl_component():
                             'kubernetes': {'image': None, 'qos': None, 'image-pull-secret': None,
                                            'namespace': 'default', 'api-key-var': None,
                                            'host': 'http://localhost:8080', 'cpuUnitsPerCore': None,
-                                           'gracePeriod': None, 'podSpec': None}, 'docker': {'image': None}}}
+                                           'gracePeriod': None, 'podSpec': None},
+                            'docker': {'image': None, 'imagePullPolicy': 'Always'}}}
 
 
 def test_graph_generate_new_dsl_component_platform_variables():

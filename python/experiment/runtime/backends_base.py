@@ -653,7 +653,8 @@ class DockerExecutableChecker(ContainerBasedExecutableChecker):
         stderr = open(stderr_path, 'wt') if stderr_path else None
 
         return experiment.runtime.backend_interfaces.docker.DockerTask(
-            executor, stdout=open(stdout_path, 'wt'), stderr=stderr, shell=True)
+            executor, stdout=open(stdout_path, 'wt'), stderr=stderr, shell=True,
+            pull_policy=self.resourceManager['docker']['imagePullPolicy'])
 
     def _get_target_image(self) -> str:
         return self.resourceManager['docker']['image']

@@ -44,7 +44,7 @@ The following snippet will install `st4sd-runtime-core` and run a toy-workflow o
 virtualenv -p python3 $HOME/st4sd-runtime-test
 source $HOME/st4sd-runtime-test/bin/activate
 pip install st4sd-runtime-core[deploy]
-git clone git@github.com:st4sd/sum-numbers.git
+git clone http://github.com/st4sd/sum-numbers.git
 elaunch.py --nostamp -l40 sum-numbers
 ```
 

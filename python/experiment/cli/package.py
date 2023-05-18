@@ -5,6 +5,7 @@
 import datetime
 import json
 import os
+import pathlib
 from pathlib import Path
 from typing import Optional, List
 
@@ -63,6 +64,48 @@ def update_commit_in_base_package_for_repo(pvep, origin_url, head_commit):
     if not belongs_to_repo:
         stderr.print(f"The repository {origin_url} is not referenced in the base packages of the input experiment")
         raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
+
+    return pvep
+
+
+def get_pvep_from_url(ctx: typer.Context, url: HttpUrl, from_context: Optional[str]):
+    config: Configuration = ctx.obj
+
+    # We assume the URL to be something like
+    # https://host/some/path/exp-name#an-optional-anchor
+    exp_name = url.path.split("/")[-1]
+
+    # If we have from_context we can log into the API
+    if from_context is not None:
+        context_url = f"{url.scheme}://{url.host}"
+        token = keyring.get_password(context_url, from_context)
+        if token is None:
+            stderr.print(f"Unable to get password for provided context {from_context}")
+            stderr.print(f"Try to log in again with:"
+                         f" [yellow]stp login --context-name {from_context} {context_url} --force [/yellow]")
+            raise typer.Exit(STPExitCodes.UNAUTHORIZED)
+        api = get_api(ctx, from_context)
+        try:
+            result = api.api_request_get(f"experiments/{exp_name}?outputFormat=json&hideMetadataRegistry=y&hideNone=y")
+            pvep = result['entry']
+        except Exception as e:
+            stderr.print(f"Unable to retrieve experiment: {e}")
+            raise typer.Exit(STPExitCodes.IO_ERROR)
+    # With no context we assume we're accessing a publicly available registry
+    else:
+        try:
+            exp_def_address = f"{url.scheme}://{url.host}/registry-ui/backend/experiments/{exp_name}?outputFormat=json&hideMetadataRegistry=y&hideNone=y"
+            result = requests.get(exp_def_address)
+            if result.status_code != 200:
+                stderr.print(f"The server returned error {result.status_code}")
+                stderr.print("If you're trying to retrieve a PVEP from a private registry, add the [blue]--from-context[/blue] option "
+                             "to pass the name of the context you want to use to access the data.")
+                stderr.print(f"Example: [blue]--from-context {config.settings.default_context}[/blue]")
+                raise typer.Exit(STPExitCodes.UNAUTHORIZED)
+            pvep = result.json()['entry']
+        except Exception as e:
+            stderr.print(f"Unable to retrieve experiment: {e}")
+            raise typer.Exit(code=STPExitCodes.IO_ERROR)
 
     return pvep
 
@@ -129,6 +172,56 @@ def push(
         write_package_to_file(pvep, path)
 
 
+@app.command("download")
+def download_experiment(
+        ctx: typer.Context,
+        from_url: str = typer.Option(...,
+                                     help="URL to the  experiment."
+                                          "Must be a URL to an ST4SD Registry UI entry. "
+                                          "E.g.: https://registry.st4sd.res.ibm.com/experiment/band-gap-dft-gamess-us"),
+        from_context: Optional[str] = typer.Option(default=None,
+                                                   help="Optional context to use for accessing the target endpoint."
+                                                        "Must be set if the target registry requires authorisation"),
+        to_folder: pathlib.Path = typer.Option(".",
+                                               help="Folder in which to save the PVEP",
+                                               exists=True,
+                                               resolve_path=True,
+                                               writable=True,
+                                               dir_okay=True),
+        output_format: str = typer.Option("json",
+                                          help="Output format in which to save the PVEP."
+                                               "Currently supported values: json, yaml")
+):
+    """
+    Downloads a package from an external registry.
+
+    Usage:
+    stp package download [--from-url <url to the package in another ST4SD's Registry UI>]
+    [--from-context <context information to use in case the target registry requires authorisation>]
+    [--to-folder <folder in which to save the PVEP>]
+    [--output-format <json or yaml>]
+    """
+
+    # AP: typer doesn't currently support HttpUrl as a type,
+    # so we need to perform validation later
+    try:
+        url: HttpUrl = parse_obj_as(HttpUrl, from_url)
+    except ValidationError as e:
+        stderr.print(f"{from_url} is not valid a valid URL: [red]{e.errors()[0].get('msg')}[/red]")
+        raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
+
+    pvep = get_pvep_from_url(ctx, url, from_context)
+    pvep_file_name = pathlib.Path(pvep['metadata']['package']['name'] + f".{output_format}")
+    pvep_path = to_folder / pvep_file_name
+    if pvep_path.exists():
+        stderr.print(f"File {pvep_path} already exists.")
+        stderr.print("Please use the --to-folder option to specify a different folder")
+        raise typer.Exit(code=STPExitCodes.IO_ERROR)
+
+    write_package_to_file(pvep, pvep_path)
+    stdout.print(f"Experiment saved to {pvep_path}")
+
+
 @app.command("import")
 def import_experiment(
         ctx: typer.Context,
@@ -157,41 +250,8 @@ def import_experiment(
         stderr.print(f"{from_url} is not valid a valid URL: [red]{e.errors()[0].get('msg')}[/red]")
         raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
 
-    # We assume the URL to be something like
-    # https://host/some/path/exp-name#an-optional-anchor
-    exp_name = url.path.split("/")[-1]
-
-    # If we have from_context we can log into the API
-    if from_context is not None:
-        context_url = f"{url.scheme}://{url.host}"
-        token = keyring.get_password(context_url, from_context)
-        if token is None:
-            stderr.print(f"Unable to get password for provided context {from_context}")
-            stderr.print(f"Try to log in again with:"
-                         f" [yellow]stp login --context-name {from_context} {context_url} --force [/yellow]")
-            raise typer.Exit(STPExitCodes.UNAUTHORIZED)
-        api = get_api(ctx, from_context)
-        try:
-            result = api.api_request_get(f"experiments/{exp_name}?outputFormat=json&hideMetadataRegistry=y&hideNone=y")
-            pvep = result['entry']
-        except Exception as e:
-            stderr.print(f"Unable to retrieve experiment: {e}")
-            raise typer.Exit(STPExitCodes.IO_ERROR)
-    # With no context we assume we're accessing a publicly available registry
-    else:
-        try:
-            exp_def_address = f"{url.scheme}://{url.host}/registry-ui/backend/experiments/{exp_name}?outputFormat=json&hideMetadataRegistry=y&hideNone=y"
-            result = requests.get(exp_def_address)
-            if result.status_code != 200:
-                stderr.print(f"Unable to retrieve experiment, the server returned error {result.status_code}")
-                stderr.print("If you're trying to import from a private registry, use the --from-context option")
-                stderr.print("To pass the name of the context you want to use to access the data.")
-                raise typer.Exit(STPExitCodes.UNAUTHORIZED)
-            pvep = result.json()['entry']
-        except Exception as e:
-            stderr.print(f"Unable to retrieve experiment: {e}")
-            raise typer.Exit(code=STPExitCodes.IO_ERROR)
-
+    pvep = get_pvep_from_url(ctx, url, from_context)
+    exp_name = pvep['metadata']['package']['name']
     api = get_api(ctx)
     try:
         result = api.api_experiment_push(pvep)

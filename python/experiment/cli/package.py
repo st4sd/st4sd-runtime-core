@@ -21,6 +21,7 @@ from experiment.cli.api import get_api
 from experiment.cli.configuration import Configuration
 from experiment.cli.exit_codes import STPExitCodes
 from experiment.cli.git import get_git_origin_url, get_git_head_commit, get_git_toplevel_path
+from experiment.cli.pull_secrets import check_stack_has_pull_secrets_for_pvep_images
 from experiment.model.storage import ExperimentPackage
 
 app = typer.Typer(no_args_is_help=True)
@@ -168,6 +169,8 @@ def push(
             stdout.print("Experiment pushed successfully")
             stdout.print(json.dumps(result, indent=2))
 
+    check_stack_has_pull_secrets_for_pvep_images(api, result)
+
     if update_package_definition:
         write_package_to_file(pvep, path)
 
@@ -263,9 +266,11 @@ def import_experiment(
             stdout.print("Experiment pushed successfully")
             stdout.print(json.dumps(result, indent=2))
 
+    check_stack_has_pull_secrets_for_pvep_images(api, result)
+
     active_context_name = config.settings.default_context
     url = config.contexts.entries.get(active_context_name).url
-    stdout.print(f"Success! You can find the imported PVEP at:")
+    stdout.print(f"[green]Success![/green] You can find the imported PVEP at:")
     stdout.print(f"{url}/registry-ui/experiment/{exp_name}")
 
 

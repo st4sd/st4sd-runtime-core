@@ -5,6 +5,9 @@
 
 # Hack to hide the logs for missing lsf and tinydb
 import logging
+
+from experiment.cli import stack
+
 logging.getLogger().setLevel(logging.CRITICAL)
 
 from pathlib import Path
@@ -31,7 +34,8 @@ app.add_typer(context.app, name="context",
               help="Activate, list, or delete contexts")
 app.add_typer(package.app, name="package",
               help="Create, update, push, import and test Parameterised Virtual Experiment Packages (PVEPs)")
-
+app.add_typer(stack.app, name="stack",
+              help="Manage the ST4SD stack")
 
 @app.callback()
 def common_options(ctx: typer.Context,

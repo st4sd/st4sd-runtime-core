@@ -3026,6 +3026,13 @@ class FlowIR(object):
                     errors.append(experiment.model.errors.FlowIRInvalidComponent(
                         missing=missing, extra={}, invalid={}, componentName=component_name,
                         stage_index=stage_index, message=msg))
+                elif image == "":
+                    invalid = {'resourceManager.kubernetes.image': ''}
+                    msg = (f"Component uses the kubernetes backend but resourceManager.kubernetes.image "
+                           f"is assigned an empty string")
+                    errors.append(experiment.model.errors.FlowIRInvalidComponent(
+                        missing={}, extra={}, invalid=invalid, componentName=component_name,
+                        stage_index=stage_index, message=msg))
 
         if component_ids is not None:
             # VV: If flowir is supplied then we can run more checks, i.e. look for references to non-existing

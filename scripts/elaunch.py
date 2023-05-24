@@ -367,7 +367,10 @@ def Setup(setupPath, options):
 
     # VV: Experiment instance dir has been generated, validate the the experiment
     try:
-        compExperiment.validateExperiment(ignoreTestExecutablesError=options.ignoreTestExecutablesError)
+        compExperiment.validateExperiment(
+            ignoreTestExecutablesError=options.ignoreTestExecutablesError,
+            checkExecutables=options.checkExecutables
+        )
     except Exception as error:
         rootLogger.log(15, traceback.format_exc())
         setup_error = experiment.model.errors.ExperimentInvalidConfigurationError(
@@ -1219,6 +1222,10 @@ def build_parser() -> NoSystemExitOptparseOptionParser:
                                   'to the centralized experiment instance database if --registerWorkflow is Yes',
                              default=None,
                              metavar='DISCOVERER_MONITOR_DIR')
+    launchOptions.add_option('', '--checkExecutables', dest='checkExecutables',
+                             metavar="YES/NO", action="callback", default=True, callback=cb_parse_bool, type=str,
+                             help="Set to Yes to check executables and pin the images of tasks "
+                                  "which use backends such as docker and kubernetes. Default is Yes")
     launchOptions.add_option('', '--ignoreTestExecutablesError', dest='ignoreTestExecutablesError',
                              metavar="YES/NO", action="callback", default=False, callback=cb_parse_bool, type=str,
                              help="Set to Yes to not treat issues during executable checking and resolution as errors. "

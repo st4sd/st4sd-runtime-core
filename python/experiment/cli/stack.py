@@ -13,5 +13,6 @@ app = typer.Typer(no_args_is_help=True)
 stderr = Console(stderr=True)
 stdout = Console()
 
-app.add_typer(pull_secrets.app, name="pull-secrets",
-              help="Manage stack-wide pull secrets")
+app.add_typer(
+    pull_secrets.app, name="pull-secrets", help="Manage stack-wide pull secrets"
+)

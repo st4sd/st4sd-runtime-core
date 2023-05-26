@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from experiment.cli.configuration import Configuration
+from experiment.cli.configuration import Configuration, Context
 from experiment.cli.exit_codes import STPExitCodes
 
 app = typer.Typer(no_args_is_help=True)
@@ -17,16 +17,30 @@ stderr = Console(stderr=True)
 stdout = Console()
 
 
-@app.command("list")
-def list_contexts(ctx: typer.Context):
+@app.command("list", options_metavar="[--simple]")
+def list_contexts(
+    ctx: typer.Context,
+    simple: bool = typer.Option(
+        False,
+        "--simple",
+        help="Use a simpler output style. Better suited for scripts.",
+        is_flag=True,
+    ),
+):
     """
     List available contexts
     """
     config: Configuration = ctx.obj
-    if len(config.contexts.entries.keys()) == 0:
-        stderr.print("No contexts are available")
-        stderr.print("Use stp login to create one")
+
+    if not config.contexts.entries:
+        stderr.print("No contexts are available.")
+        stderr.print("[italic]Tip:\tUse [blue]stp login[/blue] to create one.[/italic]")
         raise typer.Exit(code=STPExitCodes.CONTEXT_ERROR)
+
+    if simple:
+        for context in config.contexts.entries.keys():
+            stdout.print(context.lower())
+        return
 
     contexts_table = Table("Available contexts")
     for context in config.contexts.entries.keys():
@@ -35,43 +49,117 @@ def list_contexts(ctx: typer.Context):
 
 
 @app.command()
-def activate(ctx: typer.Context,
-             name: str = typer.Argument(..., help="The context to set as default")):
+def activate(
+    ctx: typer.Context,
+    name: str = typer.Argument(
+        ..., help="The context to set as default.", show_default=False
+    ),
+):
     """
     Set a context as the active/default
     """
     config: Configuration = ctx.obj
+
     name = name.lower()
     if config.contexts.entries.get(name) is None:
-        stderr.print(f"Context {name} does not exist")
-        stderr.print(f"Use [blue]stp login --context-name {name} YOUR_URL[/blue] to add it")
+        stderr.print(
+            f"[red]Error:[/red]\tContext [bold]{name}[/bold] does not exist.\n"
+            f"[italic]Tip:\tList the available contexts with [blue]stp context list[/blue]\n"
+            f"\tOr use [blue]stp login --context-name {name} YOUR_URL[/blue] to add it.[/italic]"
+        )
         raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
 
     config.settings.default_context = name
     config.update()
 
 
-@app.command()
-def show(ctx: typer.Context):
+@app.command(options_metavar="[-v | --verbose]")
+def show(
+    ctx: typer.Context,
+    verbose: bool = typer.Option(
+        False, "-v", "--verbose", help="Use verbose output.", is_flag=True
+    ),
+):
     """
     Print the active/default context
     """
     config: Configuration = ctx.obj
+    if not config.settings.verbose:
+        config.settings.verbose = verbose
+
     if config.settings.verbose:
         stdout.print("The current context is:")
     stdout.print(config.settings.default_context)
 
 
-@app.command()
-def delete(ctx: typer.Context, name: str = typer.Argument(..., help="The context to delete")):
+@app.command(options_metavar="--to <name>")
+def rename(
+    ctx: typer.Context,
+    original_name: str = typer.Argument(
+        ..., help="The context to rename.", show_default=False
+    ),
+    new_name: str = typer.Option(
+        ..., "--to", help="The new name for the context.", show_default=False
+    ),
+):
+    """
+    Renames a context
+    """
+    config: Configuration = ctx.obj
+    original_name = original_name.lower()
+    new_name = new_name.lower()
+
+    from_context = config.contexts.entries.get(original_name)
+    if from_context is None:
+        stderr.print(
+            f"[red]Error:[/red]\tContext [bold]{original_name}[/bold] does not exist."
+        )
+        raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
+
+    to_context = config.contexts.entries.get(new_name)
+    if to_context is not None:
+        stderr.print(
+            f"[red]Error:[/red]\tContext [bold]{new_name}[/bold] already exists."
+            f"[italic]Tip:\tYou can delete it with [blue]stp context delete {new_name}[/blue][/italic]"
+        )
+        raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
+
+    # Ensure the credentials will be available for the new name
+    url = from_context.url
+    token = keyring.get_password(url, original_name)
+    keyring.delete_password(url, original_name)
+    keyring.set_password(url, new_name, token)
+
+    # Update the configuration accordingly
+    del config.contexts.entries[original_name]
+    config.contexts.entries[new_name] = Context(name=new_name, url=url)
+    if config.settings.default_context == original_name:
+        config.settings.default_context = new_name
+
+    config.update()
+    stdout.print("[green]Success![/green]")
+
+
+@app.command(options_metavar="[-v | --verbose]")
+def delete(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="The context to delete.", show_default=False),
+    verbose: bool = typer.Option(
+        False, "-v", "--verbose", help="Use verbose output.", is_flag=True
+    ),
+):
     """
     Delete a context and its related credentials
     """
     config: Configuration = ctx.obj
+    if not config.settings.verbose:
+        config.settings.verbose = verbose
+
     name = name.lower()
+
     context = config.contexts.entries.get(name)
     if context is None:
-        stderr.print(f"Context {name} does not exist")
+        stderr.print(f"[red]Error:[/red]\tContext [bold]{name}[/bold] does not exist.")
         raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
 
     url = context.url
@@ -83,10 +171,12 @@ def delete(ctx: typer.Context, name: str = typer.Argument(..., help="The context
     # Update the configuration accordingly
     del config.contexts.entries[name]
     if config.settings.default_context == name:
-        if config.settings.verbose:
-            stdout.print(f"{name} was the default context.")
-            stdout.print("Use [blue]stp context activate[/blue] to set a new one as the default.")
-            stdout.print("Or use [blue]stp login[/blue] to log in to a new context")
+        stdout.print(
+            f"[bold]NOTE:\t{name}[/bold] was the default context.\n"
+            "[italic]Tip:\tUse [blue]stp context activate[/blue] to set a new one as the default.\n"
+            "\tOr use [blue]stp login[/blue] to log in to a new context[/italic]"
+        )
         config.settings.default_context = None
 
     config.update()
+    stdout.print("[green]Success![/green]")

@@ -16,7 +16,7 @@ import re
 import traceback
 import weakref
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set,
-                    Tuple, Union)
+                    Tuple, Union, NamedTuple)
 from typing import cast
 
 import networkx
@@ -406,6 +406,57 @@ def ConsumersForNode(nodeLabel, graph):
     # Have to reference the direction to get producers
     inputEdges = graph.edges(nodeLabel)
     return [el[1] for el in inputEdges]
+
+
+
+class ExternalReferenceParameter(NamedTuple):
+    """The name follows the rules in _dsl_parameter_name_from_external_reference()
+
+    the value is that of @name that the workflow should propagate to steps
+    entrypoing is the value that the entrypoint should propagate to the workflow value
+    """
+    name: str
+    value: str
+    entrypoint: str
+
+
+def _dsl_parameter_name_from_external_reference(ref: str) -> ExternalReferenceParameter:
+    """Utility to generates a parameter name from a reference to an external path (input, app-dep, etc)
+
+    Examples: ::
+
+        func("input/foo.txt:ref") -> name=input.foo.txt and value="%(input.foo.txt)":ref
+        func("data/foo.txt:ref") -> name=data.foo.txt and value="%(data.foo.txt)":ref
+        func("foo:ref") -> name=manifest.foo and value="%(manifest.foo)s":ref
+        func("foo/bar.txt:ref") -> name=manifest.foo and value="%(manifest.foo)s/bar.txt":ref
+
+    Arguments:
+        ref: A string representation of a DataReference
+    """
+
+    _, directory, filename, method = experiment.model.frontends.flowir.FlowIR.ParseDataReferenceFull(ref)
+
+    entrypoint = directory.split(":", 1)[0]
+
+    tokens = directory.split("/", 1)
+
+    if len(tokens) == 2 and tokens[0] in ['input', 'data']:
+        producer, filename = tokens
+
+        if filename:
+            param_name = '.'.join((producer, filename))
+        else:
+            param_name = producer
+        value = f'"%({param_name})s":{method}'
+        return ExternalReferenceParameter(name=param_name, value=value, entrypoint=entrypoint)
+    else:
+        producer = '.'.join(("manifest", directory))
+
+        if filename:
+            value = f'"%({producer})s/{filename}":{method}'
+        else:
+            value = f'"%({producer})s":{method}'
+        return ExternalReferenceParameter(name=producer, value=value, entrypoint=entrypoint)
 
 
 class ComponentIdentifier:
@@ -1155,14 +1206,10 @@ class ComponentSpecification(experiment.model.interface.InternalRepresentationAt
 
         return dsl
 
-    def get_dsl_args(self, workflow_param_refs: Dict[str, str]) -> Dict[str, Any]:
+    def get_dsl_args(self) -> Dict[str, Any]:
         """Returns the arguments for the DSL blueprint of this component
 
         This is the dictionary for calling the "signature" of this component.
-
-        Arguments:
-            workflow_param_refs: A dictionary whose keys are references to external paths (e.g. app-deps, inputs, etc)
-              and values are names of the workflow parameter that the reference should be translated into.
         """
 
         comp_no_platform = self.workflowGraphRef().configurationForNode(
@@ -1203,7 +1250,8 @@ class ComponentSpecification(experiment.model.interface.InternalRepresentationAt
             else:
                 # VV: this is a reference to a path that is not computed by other steps (app-dep, data, input, etc)
                 # this reference will have a corresponding workflow parameter.
-                my_args[new_param] = f"%({workflow_param_refs[ref]})s"
+                wf_param = _dsl_parameter_name_from_external_reference(ref)
+                my_args[new_param] = wf_param.value
 
         return my_args
 
@@ -2293,6 +2341,8 @@ class WorkflowGraph(object):
                 if ref in known_param_refs:
                     continue
 
+                wf_param = _dsl_parameter_name_from_external_reference(ref)
+
                 stageIndex, jobName, filename, method = experiment.model.frontends.flowir.FlowIR.ParseDataReferenceFull(
                     ref, index=spec.identification.stageIndex, special_folders=top_level_folders,
                     application_dependencies=app_deps)
@@ -2301,10 +2351,7 @@ class WorkflowGraph(object):
                     # VV: This is a reference that points to a component, skip it
                     continue
 
-                num_param = len(known_param_refs)
-
-                if jobName.split("/")[0] == "input":
-                    main_args[f'param{num_param}'] = ref
+                main_args[wf_param.name] = wf_param.entrypoint
 
                 known_param_refs.add(ref)
 
@@ -2343,7 +2390,7 @@ class WorkflowGraph(object):
         # Those that are pointing to `input` files should also be part of entrypoint.execute.args
         # Those that point to app-deps/data, etc should not be part of entrypoint but should have a default value
         #   (the reference string)
-        known_param_refs = dict()
+        known_param_refs = set()
 
         params_no_default = []
         params_with_default = []
@@ -2351,8 +2398,9 @@ class WorkflowGraph(object):
         for name in sorted(graph.nodes):
             spec: ComponentSpecification = graph.nodes[name]['componentSpecification']
             for ref in sorted(spec.rawDataReferences):
+                wf_param = _dsl_parameter_name_from_external_reference(ref)
 
-                if ref in known_param_refs:
+                if wf_param.name in known_param_refs:
                     continue
 
                 stageIndex, jobName, filename, method = experiment.model.frontends.flowir.FlowIR.ParseDataReferenceFull(
@@ -2363,15 +2411,12 @@ class WorkflowGraph(object):
                     # VV: This is a reference that points to a component, skip it
                     continue
 
-                num_param = len(known_param_refs)
-                param_name = f"param{num_param}"
-
                 if jobName.split("/")[0] != "input":
-                    params_with_default.append({'name': param_name, 'default': ref})
+                    params_with_default.append({'name': wf_param.name, 'default': wf_param.entrypoint})
                 else:
-                    params_no_default.append({'name': param_name})
+                    params_no_default.append({'name': wf_param.name})
 
-                known_param_refs[ref] = param_name
+                known_param_refs.add(wf_param.name)
 
         # VV: The order of parameters is:
         # 1. parameters with no default values (e.g. input files)
@@ -2396,8 +2441,7 @@ class WorkflowGraph(object):
         workflow['execute'] = [
             {
                 'target': f"<{name}>",
-                'args': cast(ComponentSpecification, graph.nodes[name]['componentSpecification'])
-                        .get_dsl_args(known_param_refs)
+                'args': cast(ComponentSpecification, graph.nodes[name]['componentSpecification']).get_dsl_args()
             } for name in networkx.topological_sort(graph)
         ]
 

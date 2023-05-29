@@ -284,7 +284,9 @@ def test_graph_generate_new_dsl_workflow_one_component():
             {
                 'target': '<main>',
                 'args': {
-                    'from-platform': "in-entrypoint"
+                    'from-platform': "in-entrypoint",
+                    'manifest.fromManifest': 'fromManifest',
+                    'manifest.dataset': 'dataset'
                 }
             },
         ]
@@ -297,8 +299,8 @@ def test_graph_generate_new_dsl_workflow_one_component():
     assert workflow['signature'] == {
         'name': 'main',
         'parameters': [
-            {'name': 'param0', 'default': 'dataset:ref'},
-            {'name': 'param1', 'default': 'fromManifest:ref'},
+            {'name': 'manifest.dataset', 'default': 'dataset'},
+            {'name': 'manifest.fromManifest', 'default': 'fromManifest'},
             {'name': 'from-platform', 'default': 'in-entrypoint'},
         ]
     }
@@ -306,15 +308,15 @@ def test_graph_generate_new_dsl_workflow_one_component():
     assert workflow['steps'] == {'stage0.hello': 'stage0.hello'}
 
     assert workflow['execute'] == [
-                {
-                    'target': '<stage0.hello>',
-                    'args': {
-                        'from-platform': '%(from-platform)s',
-                        'param0': '%(param0)s',
-                        'param1': '%(param1)s'
-                    }
-                }
-            ]
+        {
+            'target': '<stage0.hello>',
+            'args': {
+                'from-platform': '%(from-platform)s',
+                'param0': '"%(manifest.dataset)s":ref',
+                'param1': '"%(manifest.fromManifest)s":ref'
+            }
+        }
+    ]
 
 
 def test_graph_generate_new_dsl_workflow_two_components():
@@ -361,7 +363,9 @@ def test_graph_generate_new_dsl_workflow_two_components():
             {
                 'target': '<main>',
                 'args': {
-                    'from-platform': "in-entrypoint"
+                    'from-platform': "in-entrypoint",
+                    'manifest.dataset': "dataset",
+                    'manifest.fromManifest': "fromManifest",
                 }
             },
         ]
@@ -374,8 +378,8 @@ def test_graph_generate_new_dsl_workflow_two_components():
     assert workflow['signature'] == {
         'name': 'main',
         'parameters': [
-            {'name': 'param0', 'default': 'dataset:ref'},
-            {'name': 'param1', 'default': 'fromManifest:ref'},
+            {'name': 'manifest.dataset', 'default': 'dataset'},
+            {'name': 'manifest.fromManifest', 'default': 'fromManifest'},
             {'name': 'from-platform', 'default': 'in-entrypoint'},
         ]
     }
@@ -390,8 +394,8 @@ def test_graph_generate_new_dsl_workflow_two_components():
             'target': '<stage0.hello>',
             'args': {
                 'from-platform': '%(from-platform)s',
-                'param0': '%(param0)s',
-                'param1': '%(param1)s'
+                'param0': '"%(manifest.dataset)s":ref',
+                'param1': '"%(manifest.fromManifest)s":ref'
             }
         },
         {
@@ -441,12 +445,19 @@ def test_graph_generate_new_dsl_workflow_one_component_input_file():
 
     workflow = {name: dict(value) if isinstance(value, OrderedDict) else value for (name, value) in workflow.items()}
 
+    assert dsl['entrypoint']['execute'][0]['args'] == {
+        'from-platform': 'in-entrypoint',
+        'manifest.dataset': 'dataset',
+        'manifest.fromManifest': 'fromManifest',
+        'input.hi': 'input/hi'
+    }
+
     assert workflow['signature'] == {
         'name': 'main',
         'parameters': [
-            {'name': 'param2'},
-            {'name': 'param0', 'default': 'dataset:ref'},
-            {'name': 'param1', 'default': 'fromManifest:ref'},
+            {'name': 'input.hi'},
+            {'name': 'manifest.dataset', 'default': 'dataset'},
+            {'name': 'manifest.fromManifest', 'default': 'fromManifest'},
             {'name': 'from-platform', 'default': 'in-entrypoint'},
         ]
     }
@@ -458,9 +469,9 @@ def test_graph_generate_new_dsl_workflow_one_component_input_file():
             'target': '<stage0.hello>',
             'args': {
                 'from-platform': '%(from-platform)s',
-                'param0': '%(param0)s',
-                'param1': '%(param1)s',
-                'param2': '%(param2)s'
+                'param0': '"%(manifest.dataset)s":ref',
+                'param1': '"%(manifest.fromManifest)s":ref',
+                'param2': '"%(input.hi)s":ref'
             }
         }
     ]
@@ -508,7 +519,9 @@ def test_graph_generate_new_dsl_workflow_one_component_and_platform():
                 'target': '<main>',
                 'args': {
                     'from-platform': "in-entrypoint",
-                    'another-var': "in-entrypoint"
+                    'another-var': "in-entrypoint",
+                    'manifest.dataset': "dataset",
+                    'manifest.fromManifest': "fromManifest"
                 }
             },
         ]
@@ -521,8 +534,8 @@ def test_graph_generate_new_dsl_workflow_one_component_and_platform():
     assert workflow['signature'] == {
         'name': 'main',
         'parameters': [
-            {'name': 'param0', 'default': 'dataset:ref'},
-            {'name': 'param1', 'default': 'fromManifest:ref'},
+            {'name': 'manifest.dataset', 'default': 'dataset'},
+            {'name': 'manifest.fromManifest', 'default': 'fromManifest'},
             {'name': 'another-var', 'default': 'in-entrypoint'},
             {'name': 'from-platform', 'default': 'in-entrypoint'},
         ]
@@ -530,17 +543,18 @@ def test_graph_generate_new_dsl_workflow_one_component_and_platform():
 
     assert workflow['steps'] == {'stage0.hello': 'stage0.hello'}
 
-    assert workflow['execute'] == [
-                {
-                    'target': '<stage0.hello>',
-                    'args': {
-                        'from-platform': '%(from-platform)s',
-                        'another-var': '%(another-var)s',
-                        'param0': '%(param0)s',
-                        'param1': '%(param1)s'
-                    }
-                }
-            ]
+    assert len(workflow['execute']) == 1
+
+    step0 = workflow['execute'][0]
+    assert step0 == {
+        'target': '<stage0.hello>',
+        'args': {
+            'from-platform': '%(from-platform)s',
+            'another-var': '%(another-var)s',
+            'param0': '"%(manifest.dataset)s":ref',
+            'param1': '"%(manifest.fromManifest)s":ref'
+        }
+    }
 
 
 def test_graph_generate_new_dsl_workflow_one_component_param_order():
@@ -580,8 +594,76 @@ def test_graph_generate_new_dsl_workflow_one_component_param_order():
     assert workflow['signature'] == {
         'name': 'main',
         'parameters': [
-            {'name': 'param1'},
-            {'name': 'param0', 'default': 'dataset:ref'},
+            {'name': 'input.msg.txt'},
+            {'name': 'manifest.dataset', 'default': 'dataset'},
             {'name': 'backend', 'default': 'kubernetes'}
         ]
+    }
+
+
+def test_graph_generate_new_dsl_workflow_double_reference_workflow_parameter():
+    flowir = experiment.model.frontends.flowir.yaml_load("""
+        application-dependencies:
+          default:
+          - dataset
+        environments:
+          default:
+            my-env:
+              FOO: bar
+
+        variables:
+          default:
+            global:
+              backend: kubernetes
+
+        components:
+        - name: hello
+          command:
+            executable: sh
+            arguments: -c "hello %(backend)s; ls -lth dataset:ref; cat input/msg.txt:ref"
+            expandArguments: "none"
+            environment: my-env
+          references:
+          - dataset:ref
+          - input/msg.txt:ref
+          - input/msg.txt:copy
+          - data/other.txt:copy
+        """)
+    graph = experiment.model.graph.WorkflowGraph.graphFromFlowIR(flowir, {})
+
+    dsl = graph.to_dsl()
+
+    assert len(dsl['workflows']) == 1
+
+    workflow = dsl['workflows'][0]
+
+    assert workflow['signature'] == {
+        'name': 'main',
+        'parameters': [
+            {'name': 'input.msg.txt'},
+            {'name': 'data.other.txt', 'default': 'data/other.txt'},
+            {'name': 'manifest.dataset', 'default': 'dataset'},
+            {'name': 'backend', 'default': 'kubernetes'}
+        ]
+    }
+
+    step0 = workflow['execute'][0]
+    assert step0 == {
+        'target': '<stage0.hello>',
+        'args': {
+            'backend': '%(backend)s',
+            'param0': '"%(manifest.dataset)s":ref',
+            'param1': '"%(input.msg.txt)s":ref',
+            'param2': '"%(input.msg.txt)s":copy',
+            'param3': '"%(data.other.txt)s":copy',
+        }
+    }
+
+    entrypoint_args = dsl['entrypoint']['execute'][0]['args']
+
+    assert entrypoint_args == {
+        'backend': 'kubernetes',
+        'input.msg.txt': 'input/msg.txt',
+        'data.other.txt': 'data/other.txt',
+        'manifest.dataset': 'dataset'
     }

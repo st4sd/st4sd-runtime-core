@@ -593,7 +593,7 @@ def test(
         readable=True,
         resolve_path=True,
         file_okay=True,
-        show_default=False
+        show_default=False,
     ),
     schema_path: Optional[Path] = typer.Option(
         None,
@@ -602,7 +602,7 @@ def test(
         readable=True,
         resolve_path=True,
         file_okay=True,
-        show_default=False
+        show_default=False,
     ),
 ):
     """

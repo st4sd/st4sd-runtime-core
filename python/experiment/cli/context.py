@@ -17,9 +17,15 @@ stderr = Console(stderr=True)
 stdout = Console()
 
 
-@app.command("list", options_metavar="[--simple]")
+@app.command("list", options_metavar="[--show-url] [--simple]")
 def list_contexts(
     ctx: typer.Context,
+    show_url: bool = typer.Option(
+        False,
+        "--show-url",
+        help="Print the URL for each of the contexts.",
+        is_flag=True,
+    ),
     simple: bool = typer.Option(
         False,
         "--simple",
@@ -39,12 +45,24 @@ def list_contexts(
 
     if simple:
         for context in config.contexts.entries.keys():
-            stdout.print(context.lower())
+            if show_url:
+                stdout.print(
+                    f"{context.lower()}\t{config.contexts.entries[context].url}"
+                )
+            else:
+                stdout.print(context.lower())
         return
 
     contexts_table = Table("Available contexts")
+    if show_url:
+        contexts_table.add_column("URL")
     for context in config.contexts.entries.keys():
-        contexts_table.add_row(context.lower())
+        if show_url:
+            contexts_table.add_row(
+                context.lower(), config.contexts.entries[context].url
+            )
+        else:
+            contexts_table.add_row(context.lower())
     stdout.print(contexts_table)
 
 
@@ -73,9 +91,12 @@ def activate(
     config.update()
 
 
-@app.command(options_metavar="[-v | --verbose]")
+@app.command(options_metavar="[--show-url] [-v | --verbose]")
 def show(
     ctx: typer.Context,
+    show_url: bool = typer.Option(
+        False, "--show-url", help="Print the URL of the context.", is_flag=True
+    ),
     verbose: bool = typer.Option(
         False, "-v", "--verbose", help="Use verbose output.", is_flag=True
     ),
@@ -89,7 +110,13 @@ def show(
 
     if config.settings.verbose:
         stdout.print("The current context is:")
-    stdout.print(config.settings.default_context)
+
+    if show_url:
+        stdout.print(
+            f"{config.settings.default_context.lower()}\t{config.contexts.entries[config.settings.default_context].url}"
+        )
+    else:
+        stdout.print(config.settings.default_context)
 
 
 @app.command(options_metavar="--to <name>")

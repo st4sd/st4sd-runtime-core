@@ -59,6 +59,7 @@ def check_stack_has_pull_secrets_for_pvep_images(api: ExperimentRestAPI, pvep):
                 "[italic]Tip:\tYou can add one with: "
                 f"[blue]stp stack pull-secrets add --name {registry.split('.')[-2]} --registry {registry}[/blue]"
                 "[/italic]\n"
+                "[bold]Note:[/bold]\tIt is possible that a valid pull secret exists but was not added via ST4SD."
             )
 
 

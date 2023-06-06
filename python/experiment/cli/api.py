@@ -3,8 +3,6 @@
 #
 # Author: Alessandro Pomponio
 
-from typing import Union
-
 import keyring
 import typer
 from rich.console import Console
@@ -60,10 +58,10 @@ def get_api(ctx: typer.Context, for_context: str = None):
         api = experiment.service.db.ExperimentRestAPI(
             url, max_retries=2, secs_between_retries=1, cc_auth_token=token
         )
-    except Union[
+    except (
         experiment.service.errors.UnauthorisedRequest,
         experiment.service.errors.InvalidHTTPRequest,
-    ]:
+    ):
         stderr.print(
             "[red]Error:[/red]\tLogin attempt failed. Ensure the URL and the access token are correct.\n"
             "[italic]Tip:\tThe credentials might have expired. You can update them with:\n"

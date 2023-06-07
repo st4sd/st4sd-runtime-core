@@ -6,6 +6,7 @@
 import subprocess
 from pathlib import Path
 
+import pydantic
 import typer
 from rich.console import Console
 
@@ -45,6 +46,7 @@ def get_git_origin_url(path: Path):
         )
         if origin_url.endswith(".git"):
             origin_url = origin_url[:-4]
+
     except subprocess.CalledProcessError as e:
         stderr.print(
             "[red]Error:[/red]:\tUnable to retrieve origin url for the experiment via git.\n"
@@ -53,6 +55,23 @@ def get_git_origin_url(path: Path):
         raise typer.Exit(code=STPExitCodes.GIT_ERROR)
 
     return origin_url
+
+
+def get_alternative_git_url(original_url: str):
+    # SSH URIs look like:
+    # git@github.com:foo/bar
+    if original_url.startswith("git@"):
+        semicolon_idx = original_url.index(":")
+        host = original_url[4:semicolon_idx]
+        path = original_url[semicolon_idx + 1 :]
+        return f"https://{host}/{path}"
+    # HTTP(s) URLs look like:
+    # https://github.com/foo/bar
+    else:
+        url: pydantic.AnyHttpUrl = pydantic.parse_obj_as(
+            pydantic.AnyHttpUrl, original_url
+        )
+        return f"git@{url.host}:{url.path.lstrip('/')}"
 
 
 def get_git_head_commit(path: Path):

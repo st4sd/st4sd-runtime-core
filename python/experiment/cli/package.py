@@ -25,6 +25,7 @@ from experiment.cli.git import (
     get_git_origin_url,
     get_git_head_commit,
     get_git_toplevel_path,
+    get_alternative_git_url,
 )
 from experiment.cli.pull_secrets import check_stack_has_pull_secrets_for_pvep_images
 from experiment.model.storage import ExperimentPackage
@@ -56,10 +57,12 @@ def write_package_to_file(pvep, path: Path):
 
 def update_commit_in_base_package_for_repo(pvep, origin_url, head_commit):
     belongs_to_repo = False
+    alternative_url = get_alternative_git_url(origin_url)
     for i in range(len(pvep["base"]["packages"])):
         base_package = pvep["base"]["packages"][i]
         git_source = base_package["source"].get("git")
-        if origin_url in git_source.get("location").get("url"):
+        pkg_git_url = git_source.get("location").get("url")
+        if origin_url in pkg_git_url or alternative_url in pkg_git_url:
             belongs_to_repo = True
             if "commit" not in git_source["location"]:
                 stderr.print(

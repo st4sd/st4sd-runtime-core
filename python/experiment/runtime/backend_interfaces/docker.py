@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+import os
 import subprocess
 import sys
 import uuid
@@ -27,7 +28,8 @@ class FailedToPull(ValueError):
 
 class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
     def __init__(
-        self, executor: experiment.model.executors.DockerRun,
+        self,
+        executor: experiment.model.executors.DockerRun,
         stdout=sys.stdout, stderr=sys.stderr,
         pull_policy: str = 'Always',
         shell: bool = False,
@@ -53,13 +55,37 @@ class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
 
         # VV: this is initialized by experiment.runtime.backends.InitialiseBackendsForWorkflow()
         config = experiment.appenv.DockerConfiguration.defaultConf
-        if config and config.garbage_collect == "all" and '--rm' not in self.executor.runArguments:
+        if not config:
+            raise ValueError("docker backend has not been initialized via "
+                             "experiment.runtime.backends.InitialiseBackendsForWorkflow() yet")
 
+        if config.garbage_collect == "all" and '--rm' not in self.executor.runArguments:
             log.log(15, f"Will auto delete {self._name} because dockerConf.garbage_collect=all")
             self.executor.runArguments += " --rm "
 
+        environment = self.executor.environment
+        # VV: We use the PATH twice:
+        # 1. For the local device to locate the "docker"-like executable
+        # 2. For the executable running in the container to locate its executable
+        # Here we are just ensuring that the PATH has the information from both the local device and the container
+        # We use the local-device path last to reduce the chances of shadowing executable paths in the container
+        if 'PATH' not in environment:
+            from_env = []
+        else:
+            from_env = environment['PATH'].split(':')
+
+        from_device = os.environ.get('PATH', '').split(':')
+        to_merge = [x for x in from_device if x not in from_env]
+
+        merged = ':'.join(from_env + to_merge)
+
+        if merged:
+            if environment.get("PATH") != merged:
+                log.info(f"Updating PATH from {environment.get('PATH')} to {merged}")
+            environment["PATH"] = merged
+
         super().__init__(
-            self.executor.commandLine, cwd=self.executor.workingDir, env=self.executor.environment,
+            self.executor.commandLine, cwd=self.executor.workingDir, env=environment,
             stdout=stdout, stderr=stderr, shell=shell, **kwargs)
 
         self.log = log
@@ -78,9 +104,11 @@ class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
         try:
             log.info(f"Pulling image {self.executor.image}")
             start = datetime.datetime.now()
-            pull = subprocess.Popen(
-                f"{self.executor.executable} pull {self.executor.image}",
-                shell=True, stderr=subprocess.PIPE)
+            if self.executor.platform:
+                cmd_pull = f"{self.executor.executable} pull --platform={self.executor.platform} {self.executor.image}"
+            else:
+                cmd_pull = f"{self.executor.executable} pull {self.executor.image}"
+            pull = subprocess.Popen( cmd_pull, shell=True, stderr=subprocess.PIPE)
             pull_code = pull.wait()
             if pull_code != 0:
                 raise FailedToPull(
@@ -116,17 +144,17 @@ class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
             msg = f"Deleting container {self._name} because dockerConf.garbage_collect={garbage_collect}"
             if garbage_collect == "successful" and exit_code == 0:
                 self.log.log(15, msg)
-                subprocess.Popen(f"docker rm -f {self._name}", shell=True).wait()
+                subprocess.Popen(f"{self.executor.executable} rm -f {self._name}", shell=True).wait()
             elif garbage_collect == "failed" and exit_code is not None and exit_code != 0:
                 self.log.log(15, msg)
-                subprocess.Popen(f"docker rm -f {self._name}", shell=True).wait()
+                subprocess.Popen(f"{self.executor.executable} rm -f {self._name}", shell=True).wait()
 
         # VV: Wake up whoever is blocked at .wait()
         self._z_wait_event.set()
 
     def kill(self):
         if self._name:
-            subprocess.Popen(args=f"docker stop {self._name}", shell=True).wait()
+            subprocess.Popen(args=f"{self.executor.executable} stop {self._name}", shell=True).wait()
 
     def get_referenced_image_ids(self):
         image = self.executor.image
@@ -135,7 +163,8 @@ class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
             return {image: image}
 
         try:
-            resolve = subprocess.Popen(args=f"docker inspect {image}", stdout=subprocess.PIPE, shell=True)
+            resolve = subprocess.Popen(args=f"{self.executor.executable} inspect {image}",
+                                       stdout=subprocess.PIPE, shell=True)
             exit_code = resolve.wait()
 
             if exit_code == 0:

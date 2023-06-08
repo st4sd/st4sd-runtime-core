@@ -130,6 +130,10 @@ if __name__ == "__main__":
                            "containers which expect to be run as root. Using this parameter will instruct "
                            "flow to leave the securityContext of pods it generates empty. Doing so can be "
                            "considered a security risk and should be avoided.")
+    parser.add_option("", "--dockerExecutableOverride", dest="dockerExecutableOverride",
+                             help="Specify path to use instead of docker executable. If the executable is already in "
+                                  "your $PATH you can just specify the name (e.g. podman). This is only "
+                                  "used by Components which launch tasks using the docker backend", default=None)
     parser.add_option("-y", "--hybridQueue", dest='hybridQueue',
                       help="Specify the queue which runs jobs remotely when executing in FULLSTACK mode",
                       default=None,
@@ -219,8 +223,13 @@ if __name__ == "__main__":
     #  '/etc/podinfo/flow-k8s-conf.yml' under $INSTANCE_DIR/conf/k8s-config.yaml
     k8s_config_path = os.path.join(e.instanceDirectory.configurationDirectory, 'k8s-config.yaml')
     experiment.runtime.backends.InitialiseBackendsForWorkflow(
-        e.experimentGraph, k8s_config_path=k8s_config_path,
-        k8s_no_sec_context=options.no_k8s_security_context)
+        e.experimentGraph,
+        # VV: Only for kubernetes backend
+        k8s_config_path=k8s_config_path,
+        k8s_no_sec_context=options.no_k8s_security_context,
+        # VV: only for docker backend
+        docker_executable=options.dockerExecutableOverride,
+    )
 
     if len(components) is 0:
         rootLogger.critical("No components matching %s in stage %s" % (componentString, options.stage))

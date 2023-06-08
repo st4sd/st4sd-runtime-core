@@ -1138,24 +1138,48 @@ class DockerRun(Executor):
             options: Dict[str, Any],
     ) -> DockerRun:
 
-        '''Return an executor based on options
+        """Return an executor based on options
 
-        Parameters:
+        Arguments:
             target: The executors target: A Command subclass instance
             options: A dictionary of key-value pairs.
-                Valid keys:values are subclass specific.'''
+                Valid keys:values are subclass specific.
+
+                Required options:
+                    docker-image: The container image to use
+
+                Optional:
+                    docker-executable(str):      The path to the docker-like executable, or name of the executable
+                                                 if it exists in $PATH. Defaults to "docker" if unset
+                    docker-use-entrypoint(bool): if set to True will use executable as entrypoint of container.
+                                                 Defaults to False if unset
+                    docker-args(str):            Arguments to docker run (i.e. docker run <runArguments>)
+                    docker-platform(str):        the arguments to `--platform` for pulling and running containers.
+                                                 If unset (or empty) then `--platform` will not be set. This means that
+                                                 the docker-like executable decides which platform to pull.
+                                                 For example, if the environment contains the DOCKER_DEFAULT_PLATFORM
+                                                 env-var and the docker-like executable is actually docker then
+                                                 it will try to pull the x86 flavour of the image for the linux os.
+
+        Returns:
+            An instance of DockerRun()
+        """
 
         dockerRunArgs=""
         if 'docker-args' in options:
             dockerRunArgs = options['docker-args']
 
-        executor = DockerRun(target=target,
-                             image=options['docker-image'],
-                             mounts=[(target.environment['INSTANCE_DIR'], target.environment['INSTANCE_DIR'])],
-                             environment=target.environment,
-                             resolveShellSubstitutions=False,
-                             use_entrypoint=options.get('docker-use-entrypoint', False),
-                             runArguments=dockerRunArgs)
+        executor = cls(
+            target=target,
+            executable=options.get('docker-executable', 'docker'),
+            image=options['docker-image'],
+            mounts=[(target.environment['INSTANCE_DIR'], target.environment['INSTANCE_DIR'])],
+            environment=target.environment,
+            resolveShellSubstitutions=False,
+            use_entrypoint=options.get('docker-use-entrypoint', False),
+            platform=options.get('docker-platform'),
+            runArguments=dockerRunArgs
+        )
 
         return executor
 
@@ -1171,6 +1195,7 @@ class DockerRun(Executor):
         use_entrypoint = True,
         resolveShellSubstitutions=True,
         environment: Union[Dict[str, str], None] = None,
+        platform: Union[str, None] = None,
         useCommandEnvironment=True,
         addUser=True,
     ):
@@ -1185,6 +1210,12 @@ class DockerRun(Executor):
             workingDir: The working directory for the docker process
             use_entrypoint: if set to True will use executable as entrypoint of container
             runArguments: Arguments to docker run (i.e. docker run <runArguments>)
+            docker-platform:  the arguments to `--platform` for pulling and running containers.
+                If unset (or empty) then `--platform` will not be set. This means that
+                the docker-like executable decides which platform to pull.
+                For example, if the environment contains the DOCKER_DEFAULT_PLATFORM
+                env-var and the docker-like executable is actually docker then
+                it will try to pull the x86 flavour of the image for the linux os.
         '''
 
         super(DockerRun, self).__init__(target,
@@ -1195,11 +1226,15 @@ class DockerRun(Executor):
                             resolveShellSubstitutions=resolveShellSubstitutions,
                             useCommandEnvironment=useCommandEnvironment)
 
+        self.platform = platform
         self.image = image
         self.mounts = mounts
         self.use_entrypoint = use_entrypoint
 
         runArguments = [runArguments] if runArguments else []
+
+        if self.platform:
+            runArguments.append(f"--platform={platform}")
 
         if addUser:
             uid = os.getuid()

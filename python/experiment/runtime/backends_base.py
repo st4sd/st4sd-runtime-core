@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import sys
 import tempfile
 import uuid
 from typing import TYPE_CHECKING, Any, Dict, Tuple, Union, Optional
@@ -535,7 +537,7 @@ class ContainerBasedExecutableChecker(experiment.model.interface.ExecutableCheck
                 fd, filename = tempfile.mkstemp(dir=command.workingDir)
                 fd, filename_stderr = tempfile.mkstemp(dir=command.workingDir)
                 try:
-                    task = self._create_task_that_checks_executable(checkCommand, filename)
+                    task = self._create_task_that_checks_executable(checkCommand, filename, filename_stderr)
                     task.wait()
 
                     if task.returncode == 0:
@@ -556,6 +558,7 @@ class ContainerBasedExecutableChecker(experiment.model.interface.ExecutableCheck
                     if not try_again:
                         break
                 except Exception as e:
+                    self.log.log(15, f"Resolution failed with exception {e}")
                     last_reason_failed = e
                     continue
                 finally:
@@ -587,6 +590,16 @@ class KubernetesExecutableChecker(ContainerBasedExecutableChecker):
             stdout_path: str,
             stderr_path: Union[str, None] = None,
     ) -> experiment.runtime.backend_interfaces.k8s.NativeScheduledTask:
+        """Executes a command as a Kubernetes Job
+
+        Args:
+            command: The command to execute via a K8s Job
+            stdout_path: Path to store the stdout of the task
+            stderr_path: Unused
+
+        Returns:
+            An instance of experiment.runtime.backend_interfaces.k8s.NativeScheduledTask
+        """
         archive_path_prefix = os.path.join(command.workingDir, f"executable-check-{os.path.basename(stdout_path)}-")
 
         return LightWeightKubernetesTaskGenerator(
@@ -647,10 +660,31 @@ class DockerExecutableChecker(ContainerBasedExecutableChecker):
             stdout_path: str,
             stderr_path: Union[str, None] = None,
     ) -> experiment.runtime.backend_interfaces.docker.DockerTask:
-        docker_opts={'docker-image': self._get_target_image(), "docker-args": "--rm", "docker-use-entrypoint": True}
+        """Executes a command as a Docker-like container
+
+        Args:
+            command: The command to execute via a docker-like container
+            stdout_path: Path to store the stdout of the task
+            stderr_path: Path to store the stderr of the task
+
+        Returns:
+            An instance of experiment.runtime.backend_interfaces.k8s.NativeScheduledTask
+        """
+        config = experiment.appenv.DockerConfiguration.defaultConf
+        if not config:
+            raise ValueError("docker backend has not been initialized via "
+                             "experiment.runtime.backends.InitialiseBackendsForWorkflow() yet")
+
+        docker_opts={
+            "docker-image": self._get_target_image(),
+            "docker-args": "--rm",
+            "docker-use-entrypoint": True,
+            "docker-executable": config.executable,
+            "docker-platform": self.resourceManager['docker']['platform']
+        }
         executor = experiment.model.executors.DockerRun.executorFromOptions(command, options=docker_opts)
 
-        stderr = open(stderr_path, 'wt') if stderr_path else None
+        stderr = open(stderr_path, 'wt') if stderr_path else sys.stderr
 
         return experiment.runtime.backend_interfaces.docker.DockerTask(
             executor, stdout=open(stdout_path, 'wt'), stderr=stderr, shell=True,
@@ -705,6 +739,15 @@ class DockerExecutableChecker(ContainerBasedExecutableChecker):
             self.log.info(msg)
             return ValueError(msg), True
         elif task.returncode != 0:
+            # VV: Sometimes podman fails to mount user volumes
+            err_podman_no_mount = re.compile(r"Error: statfs .*: no such file or directory")
+            if err_podman_no_mount.fullmatch(stderr_contents.rstrip()):
+                msg = (f"Container runtime {task.executor.executable} cannot mount directories on your local "
+                       f"drive. This may be a transient problem. Consider restarting the container runtime. "
+                       f"Before exiting, the runtime printed: {stderr_contents}")
+                self.log.warning(msg)
+                raise ValueError(msg)
+
             msg = "Unable to check whether executable '%s' exists (using command environment %s), check executable " \
                   "task exited with %s" % (
                       command._executable, command._environment, task.returncode)

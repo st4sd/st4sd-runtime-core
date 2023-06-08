@@ -896,7 +896,8 @@ def test_dump_instance(saltcurve_flowir, output_dir):
                                            },
                             'docker': {
                                 'image': None,
-                                'imagePullPolicy': 'Always'
+                                'imagePullPolicy': 'Always',
+                                'platform': None,
                             },
                             'lsf': {'dockerImage': None,
                                     'dockerOptions': None,

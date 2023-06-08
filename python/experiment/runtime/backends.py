@@ -142,8 +142,9 @@ def DockerTaskGenerator(
     log = logging.getLogger('generator.docker.%s' % job.identification.identifier.lower())
     log.debug("Creating task for %s" % job.identification.identifier.lower())
 
+    resource_manager = job.resourceManager['docker']
     try:
-        image = job.resourceManager['docker']['image']
+        image = resource_manager['image']
     except KeyError as exc:
         image = None
 
@@ -154,8 +155,15 @@ def DockerTaskGenerator(
             flowir=job.configuration)
 
     # Step1. Build the DockerRun executor, it builds a commandline that includes mounts, environment, etc
+    config = experiment.appenv.DockerConfiguration.defaultConf
+    if not config:
+        raise ValueError("docker backend has not been initialized via "
+                         "experiment.runtime.backends.InitialiseBackendsForWorkflow() yet")
     executor = experiment.model.executors.DockerRun.executorFromOptions(
-        job.command, options={'docker-image': image, 'docker-use-entrypoint': True})
+        job.command,
+        options={
+            'docker-image': image, 'docker-use-entrypoint': True, 'docker-executable': config.executable,
+            'docker-platform': resource_manager['platform']})
 
     #Step 2. Create the task
     #The executor defines environment variables for all sub-executors and the task-manager (Global mode)
@@ -172,7 +180,7 @@ def DockerTaskGenerator(
         stderr=errorFile,
         shell=True,
         label=label,
-        pull_policy=job.resourceManager['docker']['imagePullPolicy'])
+        pull_policy=resource_manager['imagePullPolicy'])
 
 def KubernetesTaskGenerator(
         componentSpecification: experiment.model.interface.InternalRepresentationAttributes,
@@ -390,11 +398,16 @@ def KubernetesInitializer(
 def DockerInitializer(
         workflowGraph: experiment.model.graph.WorkflowGraph,
         k8s_garbage_collect: str | None = None,
+        docker_executable: str | None = None,
         **kwargs):
     """Initialises the docker backend
 
+    This just tests whether `docker info` exits successfully.
+
     Args:
         workflowGraph: a WorkflowGraph instance (currently not used but is part of initializer protocol)
+        docker_executable: Path to the docker executable, if the executable is already in your active $PATH
+            you can provide just its name. If unset defaults to "docker"
         k8s_garbage_collect: Controls how to delete Containers on task Completion.
             Choices are "all", "failed", "successful", and (None|"none")
 
@@ -402,14 +415,36 @@ def DockerInitializer(
         experiment.model.errors.ExperimentSetupError: If unable to initialize Docker backend with appropriate
           description
     """
-    experiment.appenv.DockerConfiguration.defaultConfiguration(garbage_collect=k8s_garbage_collect)
+    docker_executable = docker_executable or "docker"
 
-    exit_code = subprocess.Popen("docker", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).wait()
+    # VV: podman returns exit-code 125 for `podman` both docker and podman return exit-code 0 for `X info`
+    # we also get the added benefit that `X info` runs some basic tests. For example, on a mac they return
+    # a non-zero exit-code if the VM is off
+    proc = subprocess.Popen(f"{docker_executable} info", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    exit_code = proc.wait()
 
     if exit_code != 0:
-        err = ValueError(f"docker command returned exit code {exit_code}")
+        try:
+            stdout = proc.stdout.read()
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode('utf-8')
+        except Exception as e:
+            stdout = f"unable to get stdout of docker - underlying reason {e}"
+
+        try:
+            stderr = proc.stderr.read()
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode('utf-8')
+        except Exception as e:
+            stderr = f"unable to get stdout of docker - underlying reason {e}"
+        err = ValueError(f"The \"{docker_executable} info\" command returned the exit code {exit_code}. The command "
+                         f"printed the following.\nstdout: {stdout}\nstderr: {stderr}")
         raise experiment.model.errors.ExperimentSetupError(
             "Docker backend is unavailable", underlyingError=err, instance_dir=None)
+
+    experiment.appenv.DockerConfiguration.defaultConfiguration(
+        garbage_collect=k8s_garbage_collect,
+        executable=docker_executable,)
 
 
 backendGeneratorMap = {

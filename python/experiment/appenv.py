@@ -726,10 +726,12 @@ class DockerConfiguration:
     def defaultConfiguration(
             cls,
             garbage_collect: str | None = None,
+            executable: str | None = None,
     ) -> DockerConfiguration:
         """Returns the default docker environment - required for st4sd Docker backend
 
         Args:
+            executable: The path to the "docker"-like executable or the name of the executable if it is under $PATH
             garbage_collect: Controls how to delete Containers on task Completion.
                 Choices are "all", "failed", "successful", and (None|"none")
 
@@ -738,7 +740,7 @@ class DockerConfiguration:
             reason. The error object will contain further information on the underlying error
         """
         if cls.defaultConf is None:
-            return cls.newDefaultConfiguration(garbage_collect)
+            return cls.newDefaultConfiguration(garbage_collect=garbage_collect, executable=executable)
 
         return cls.defaultConf
 
@@ -746,10 +748,13 @@ class DockerConfiguration:
     def newDefaultConfiguration(
             cls,
             garbage_collect: str | None = "none",
+            executable: str | None = None,
     ) -> DockerConfiguration:
         """Builds the default docker environment - required for st4sd Docker backend
 
         Arguments:
+            executable: The path to the "docker"-like executable or the name of the executable if it is under $PATH.
+                If unset, defaults to "docker"
             garbage_collect: Controls how to delete Containers on task Completion.
                 Choices are "all", "failed", "successful", and (None|"none")
 
@@ -763,10 +768,12 @@ class DockerConfiguration:
         if garbage_collect is None:
             garbage_collect = "none"
 
-        cls.defaultConf = cls(garbage_collect)
+        executable = executable or "docker"
+
+        cls.defaultConf = cls(garbage_collect=garbage_collect, executable=executable)
         return cls.defaultConf
 
-    def __init__(self, garbage_collect: str | None = "none"):
+    def __init__(self,  executable: str, garbage_collect: str | None = "none"):
         valid_garbage_collect = ['successful', 'failed', 'all', 'none']
         garbage_collect = garbage_collect or "none"
 
@@ -777,7 +784,12 @@ class DockerConfiguration:
                 instance_dir=None)
 
         self._garbage_collect = garbage_collect
+        self._executable = executable
 
     @property
     def garbage_collect(self) -> str:
         return self._garbage_collect
+
+    @property
+    def executable(self) -> str:
+        return self._executable

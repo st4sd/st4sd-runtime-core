@@ -352,9 +352,16 @@ def Setup(setupPath, options):
 
         experiment.runtime.backends.InitialiseBackendsForWorkflow(
             compExperiment.experimentGraph, ignoreInitializeBackendError=options.ignoreInitializeBackendError,
-            logger=rootLogger, k8s_no_sec_context=options.no_k8s_security_context, k8s_config_path=k8s_config_path,
-            k8s_store_path=k8s_store_path, k8s_garbage_collect=options.kubernetesGarbageCollect,
-            k8s_archive_objects=options.kubernetesArchiveObjects
+            logger=rootLogger,
+            # VV: only for kubernetes backend
+            k8s_no_sec_context=options.no_k8s_security_context,
+            k8s_config_path=k8s_config_path,
+            k8s_store_path=k8s_store_path,
+            k8s_archive_objects=options.kubernetesArchiveObjects,
+            # VV: For both docker and kubernetes badkend
+            k8s_garbage_collect=options.kubernetesGarbageCollect,
+            # VV: only for docker backend
+            docker_executable=options.dockerExecutableOverride,
         )
     except Exception as e:
         rootLogger.log(15, '%s\nException: %s' % (traceback.format_exc(), e))
@@ -1160,6 +1167,10 @@ def build_parser() -> NoSystemExitOptparseOptionParser:
                            "by components to dependencies to the producer component + the name of the file. Default "
                            "is No", action="callback", default=False, callback=cb_parse_bool, type=str)
 
+    launchOptions.add_option("", "--dockerExecutableOverride", dest="dockerExecutableOverride",
+                             help="Specify path to use instead of docker executable. If the executable is already in "
+                                  "your $PATH you can just specify the name (e.g. podman). This is only "
+                                  "used by Components which launch tasks using the docker backend", default=None)
     launchOptions.add_option("-f", "--failSafeDelays", dest="failSafeDelays",
                              help="Set to Yes to enable failsafe delays between a component becoming ready to run and "
                                   "actually running (6 seconds). Default is yes.", default=True, action="callback",

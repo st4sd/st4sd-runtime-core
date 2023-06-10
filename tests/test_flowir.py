@@ -1655,3 +1655,11 @@ def test_no_interface(output_dir):
 
     dict_interface = exp.configuration.get_interface()
     assert dict_interface is None
+
+
+def test_variable_names():
+    text = "%(one)s %(two.three)s %(not/this-one)s %(skip this too)s %(this-is-ok)s %(123)s %(this_is_ok)s"
+
+    assert sorted(experiment.model.frontends.flowir.FlowIR.discover_references_to_variables(text)) == sorted([
+        "one", "two.three", "this-is-ok", "123", "this_is_ok"
+    ])

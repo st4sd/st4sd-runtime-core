@@ -1303,8 +1303,8 @@ class FlowIR(object):
 
     stageOptions = ['continue-on-error', 'stage-name']
 
-    VariablePattern = r'%\([a-zA-Z0-9_-]+\)s'
-    VariablePatternIncomplete = r'%\([a-zA-Z0-9_-]+\)(^s)?'
+    VariablePattern = r'%\([a-zA-Z0-9_\.-]+\)s'
+    VariablePatternIncomplete = r'%\([a-zA-Z0-9_\.-]+\)(^s)?'
 
     (
         FieldVariables, FieldComponents, FieldEnvironments,

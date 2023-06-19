@@ -79,6 +79,7 @@ def LightWeightKubernetesTaskGenerator(
         flowKubeEnvironment=flowKubeEnvironment, label=label,
         splitArgs=splitArgs, resourceRequest=resourceRequest, pollingInterval=pollingInterval,
         archive_path_prefix=archive_path_prefix,
+        archive_objects="none",
     )
 
     return task
@@ -94,6 +95,8 @@ def KubernetesTaskGenerator(executor,  # type:  experiment.model.executors.Comma
                             splitArgs=True,  # type:  bool,
                             pollingInterval: float = 30,
                             archive_path_prefix: str | None = None,
+                            garbage_collect: Optional[str] = None,
+                            archive_objects: Optional[str] = None,
                             ):
 
     '''Creates a k8s task from component specification
@@ -122,8 +125,14 @@ def KubernetesTaskGenerator(executor,  # type:  experiment.model.executors.Comma
         executor: Command to execute
         resourceManager: The definition of the backend that will execute the Command
         outputFile: The path to store the stdout under
-        archive_path_prefix: If k8s is configured to archive objects (appenv.KubernetesConfiguration.archive_objects)
-            it generates the objects "${archive_path_prefix}pods.yaml" and "${archive_path_prefix}job.yaml".
+        archive_objects: Controls how to store Job and Pod YAML objects in paths prefixed with @archive_path_prefix.
+            Choices are "all", "failed", "successful", "none"
+            When unset, defaults to appenv.KubernetesConfiguration.archive_objects
+        garbage_collect: Controls how to store the Job and Pod objects on task Completion.
+            Choices are "all", "failed", "successful", "none"
+            When unset, defaults to appenv.KubernetesConfiguration.garbage_collect
+        archive_path_prefix: If @archive_objects configures the K8s backend to store objects, the Task will
+            generates the objects "${archive_path_prefix}pods.yaml" and "${archive_path_prefix}job.yaml".
             if archive_path_prefix is None then it defaults to "${executor.working_dir}/"
         pollingInterval: Interval to poll status of task (in seconds)
     '''
@@ -197,6 +206,11 @@ def KubernetesTaskGenerator(executor,  # type:  experiment.model.executors.Comma
     resourceRequest = experiment.model.frontends.flowir.deep_copy(resourceRequest)
     resourceRequest['cpuUnitsPerCore'] = resourceManager.get('kubernetes', {}).get('cpuUnitsPerCore', None)
 
+    if garbage_collect is None:
+        garbage_collect = appenv.garbage_collect
+
+    if archive_objects is None:
+        archive_objects = appenv.archive_objects
     # VV: This is so that Job objects are automatically deleted when a `workflow` object is deleted.
     # Deleting the Job object will then trigger the deletion of the Pod objects.
     # VV: @tag:K8sOwnerReference
@@ -216,8 +230,8 @@ def KubernetesTaskGenerator(executor,  # type:  experiment.model.executors.Comma
             splitArgs=splitArgs,
             pollingInterval=pollingInterval,
             archive_path_prefix=archive_path_prefix,
-            garbage_collect = appenv.garbage_collect,
-            archive_objects = appenv.archive_objects,
+            garbage_collect = garbage_collect,
+            archive_objects = archive_objects,
             template_pod_spec=resourceManager.get('kubernetes', {}).get('podSpec')
         )
 
@@ -462,7 +476,7 @@ class ContainerBasedExecutableChecker(experiment.model.interface.ExecutableCheck
 
         return task
 
-    def findAndCheckExecutable(self, command, resolvePath=False):
+    def findAndCheckExecutable(self, command: experiment.model.executors.Command, resolvePath: bool = False) -> str:
 
         '''Finds and checks the Commands executable in a single step
 
@@ -471,7 +485,7 @@ class ContainerBasedExecutableChecker(experiment.model.interface.ExecutableCheck
         - resolvePath is True
 
         Parameters:
-            command: An executors.Command instance
+            command: An experiment.model.executors.Command instance
             resolvePath: If True the code will attempt to resolve the executable path if it is a link
 
         Raises:

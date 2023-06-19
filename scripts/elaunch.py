@@ -1287,7 +1287,8 @@ def build_parser() -> NoSystemExitOptparseOptionParser:
                                   'The Docker backend also uses this option to garbage collect containers.')
     launchOptions.add_option('--kubernetesArchiveObjects', dest='kubernetesArchiveObjects',
                              choices=["all", "failed", "successful", "none"], default=None, type="choice",
-                             help=' Controls how to store the Job and Pod objects after Kubernetes task Completion.')
+                             help='Controls how to store the Job and Pod objects after Kubernetes task Completion. '
+                                  'The flow-executable-check Job/Pod objects are never stored. ')
     # VV: Overriding means that we can detect whether the user provided a commandline or not, for the time being
     # we can configure --executionMode to just set --kubernetesGarbageCollect and --kubernetesArchiveObjects
     # and then only use --kubernetesArchiveObjects if it's not `None`

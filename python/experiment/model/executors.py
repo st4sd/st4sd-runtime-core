@@ -193,7 +193,7 @@ class LocalExecutableChecker(experiment.model.interface.ExecutableChecker):
         LocalExecutableChecker.cache_command(command, executableWithPath)
         return executableWithPath
 
-    def findAndCheckExecutable(self, command, resolvePath=False):
+    def findAndCheckExecutable(self, command: Command, resolvePath: bool = False):
 
         executable = self.findExecutable(command, resolvePath=resolvePath)
 

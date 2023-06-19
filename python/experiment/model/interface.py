@@ -4,7 +4,7 @@
 
 '''Module for abstract interfaces'''
 
-from __future__ import print_function
+from __future__ import annotations
 
 from abc import ABCMeta, abstractmethod, abstractproperty
 import typing
@@ -179,7 +179,7 @@ class ExecutableChecker:
 
         pass
 
-    def findAndCheckExecutable(self, command, resolvePath=False): # type: (Command, bool) -> str
+    def findAndCheckExecutable(self, command: Command, resolvePath: bool = False) -> str:
 
         '''Finds and checks the Commands executable in a single step
 

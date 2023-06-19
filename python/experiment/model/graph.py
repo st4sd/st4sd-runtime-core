@@ -1547,9 +1547,7 @@ class ComponentSpecification(experiment.model.interface.InternalRepresentationAt
         return command
 
     @property
-    def command(self):
-        # type: () -> "experiment.executors.Command"
-
+    def command(self) -> experiment.model.executors.Command:
         '''Returns an executor.Command object representing the receivers command line
 
         Important!: This is not a stateful object. A new instance is returned on each call to this property

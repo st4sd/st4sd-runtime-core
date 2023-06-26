@@ -52,6 +52,21 @@ This will create a new virtualenv called `st4sd-runtime-test` at `$HOME/st4sd-ru
 
 You can learn more about the toy-workflow, and  workflow specification, [here.](https://github.com/st4sd/sum-numbers) 
 
+## References
+
+If you use ST4SD in your projects, please consider citing the following:
+
+```bibtex
+@software{st4sd_2022,
+author = {Johnston, Michael A. and Vassiliadis, Vassilis and Pomponio, Alessandro and Pyzer-Knapp, Edward},
+license = {Apache-2.0},
+month = {12},
+title = {{Simulation Toolkit for Scientific Discovery}},
+url = {https://github.com/st4sd/st4sd-runtime-core},
+year = {2022}
+}
+```
+
 ## More Information
 
 Our [documentation website](https://st4sd.github.io/overview) contains detailed information on installing ST4SD, 

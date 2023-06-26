@@ -1,0 +1,35 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: Simulation Toolkit for Scientific Discovery
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Michael A.
+    family-names: Johnston
+    affiliation: IBM Research
+  - given-names: Vassilis
+    family-names: Vassiliadis
+    affiliation: IBM Research
+  - given-names: Alessandro
+    family-names: Pomponio
+    affiliation: IBM Research
+    orcid: 'https://orcid.org/0000-0003-1655-7500'
+  - given-names: Edward
+    family-names: Pyzer-Knapp
+    affiliation: IBM Research
+identifiers:
+  - type: url
+    value: 'https://github.com/st4sd/st4sd-runtime-core'
+    description: ST4SD Runtime
+repository-code: 'https://github.com/st4sd/st4sd-runtime-core'
+url: 'https://st4sd.github.io/overview/'
+keywords:
+  - accelerated-discovery
+  - simulation
+  - toolkit
+license: Apache-2.0
+date-released: '2022-12-08'

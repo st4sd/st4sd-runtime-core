@@ -19,7 +19,12 @@ import stat
 import sys
 import threading
 import time
-from typing import Any, Dict, Tuple
+from typing import (
+    Any,
+    Dict,
+    Tuple,
+    Optional,
+)
 from functools import reduce
 
 import experiment.model.errors
@@ -1560,6 +1565,8 @@ class Task(experiment.runtime.task.Task):
                  ranksPerNode=1,
                  numberThreads=1,
                  threadsPerCore=1,
+                 memory: Optional[int] = None,
+                 gpus: Optional[int] = None,
                  cwd=None,
                  arguments="",
                  resourceString="",
@@ -1606,6 +1613,9 @@ class Task(experiment.runtime.task.Task):
             ranksPerNode - The number of processes on a node. Default is 1.
             numberThreads - The number of threads per process
             threadsPerCore - The number of threads to place on each core i.e. number of hardware threads per core
+            memory - (Optional) number of bytes to request
+            gpus - (Optional) number of exclusive GPUs to use. If desiring shared use of GPUs set the option
+                `ngpus_physical=<NUMBER>` to "rusage[...]" block in resourceString
             shell - If True the argument string is pre-processed by the shell
                 The shell used will be /bin/sh.
             statusRequestInterval - How often to wait before acquiring new status information i.e. status is cached for this time period
@@ -1628,11 +1638,14 @@ class Task(experiment.runtime.task.Task):
                    'statusRequestInterval':statusRequestInterval,
                    'reservation':reservation}
 
-        resourceRequest = {'numberProcesses':numberProcesses,
-                           'ranksPerNode':ranksPerNode,
-                           'numberThreads':numberThreads,
-                           'threadsPerCore':threadsPerCore}
-
+        resourceRequest = {
+            'numberProcesses':numberProcesses,
+            'ranksPerNode':ranksPerNode,
+            'numberThreads':numberThreads,
+            'threadsPerCore':threadsPerCore,
+            'memory': memory,
+            'gpus': gpus,
+        }
 
         isHybrid = False
         preCommands = []
@@ -1702,16 +1715,19 @@ class Task(experiment.runtime.task.Task):
         self.isHybrid = isHybrid
         self.oneRankMPI = oneRankMPI
 
-        self.resourceRequest = {'numberProcesses':1,
-                           'ranksPerNode':1,
-                           'numberThreads':1,
-                           'threadsPerCore':1,
-                           'memory': None}
+        self.resourceRequest = {
+            'numberProcesses':1,
+            'ranksPerNode':1,
+            'numberThreads':1,
+            'threadsPerCore':1,
+            'memory': None,
+            'gpus': None,
+        }
 
         # VV: Ensure that resourceRequest only makes use of fields that it knows about
         if resourceRequest is not None:
             resourceRequest = {
-                key: resourceRequest[key] for key in resourceRequest if key in list(self.resourceRequest.keys())
+                key: resourceRequest[key] for key in resourceRequest if key in self.resourceRequest
             }
             self.resourceRequest.update(resourceRequest)
 
@@ -1914,9 +1930,28 @@ class Task(experiment.runtime.task.Task):
 
         return whole
 
-    def _processResourceRequest(self, submitreq, numberProcesses, ranksPerNode, numberThreads, threadsPerCore, memory):
+    def _processResourceRequest(
+        self,
+        submitreq: "lsf.SubmitReq",
+        numberProcesses: int,
+        ranksPerNode: int,
+        numberThreads: int,
+        threadsPerCore: int,
+        memory: Optional[int],
+        gpus: Optional[int]
+    ):
+        """Set LSF resource request and affinity based on arguments
 
-        '''Set LSF resource request and affinity based on arguments'''
+        Arguments:
+            submitreq: The lsf.SubmitReq to update with the resource request
+            numberProcesses: Number of processes
+            ranksPerNode: Number of processes in each Node
+            numberThreads: Number of threads per process
+            threadsPerCore: Number of threads per core
+            memory: Memory request in Bytes
+            gpus: request EXCLUSIVE use of GPU accelerators, for SHARED use of GPU accelerators set the option
+              "rusage[ngpus_physical={gpus}]" in your submitreq.resReq
+        """
 
         #
         # Note: LSF deals in processors i.e. CPUs (or possibly hwthreads)
@@ -2010,6 +2045,39 @@ class Task(experiment.runtime.task.Task):
 
         submitreq.resReq = resReq
 
+        if gpus:
+            # VV: both fields below are meant to be string-encoded integers
+            # Example: https://github.com/IBMSpectrumComputing/lsf-python-api/blob/master/examples/submit_gpu_job.py
+            gpu_opt = {lsf.JDATA_EXT_GPU_NUM: f"{gpus}", lsf.JDATA_EXT_GPU_MODE: "3"}
+
+            try:
+                submit_ext = lsf.submit_ext()
+            except AttributeError:
+                msg = "Your version of lsf-python-api does not support exclusive request of GPUs. " \
+                      f"Either update the python module lsf-python-api, or set the following in your resourceString " \
+                      f"rusage[ngpus_physical={gpus}] instead to ask for Shared GPU devices"
+                self.log.warning(msg)
+                raise ValueError(msg)
+
+            try:
+                submit_ext.keys = lsf.new_intArray(len(gpu_opt))
+                submit_ext.values = lsf.new_stringArray(len(gpu_opt))
+                for i, (key, value) in enumerate(gpu_opt.items()):
+                    lsf.intArray_setitem(submit_ext.keys, i, key)
+                    lsf.stringArray_setitem(submit_ext.values, i, value)
+                submit_ext.num = len(gpu_opt)
+                submitreq.submitExt = submit_ext
+            except Exception as e:
+                msg = "Could not configure lsf-python-api to request exclusive request of GPUs. " \
+                      f"Either update the python module lsf-python-api, or set the following in your resourceString " \
+                      f"rusage[ngpus_physical={gpus}] instead to ask for Shared GPU devices. Underlying error {e}"
+                raise ValueError(msg)
+
+            # From https://github.com/IBMSpectrumComputing/lsf-python-api/blob/master/examples/submit_gpu_job.py
+            submitreq.options4 |= lsf.SUB4_GPU_REQ
+            # VV: this seems weird, but it's in the example, and it works in my test cluster
+            submitreq.options2 |= lsf.SUB2_MODIFY_PEND_JOB
+
     def _pretty_print(self, obj: Any):
         """Iterates the attributes of an object and prints them with self.log.debug
 
@@ -2084,6 +2152,13 @@ class Task(experiment.runtime.task.Task):
 
         #Quote resource requirements
         submitreq.resReq = "\"%s\"" % submitreq.resReq
+
+        if self.resourceRequest['gpus'] and submitreq.resReq:
+            if 'ngpus_physical' in submitreq.resReq:
+                msg = "Cannot specify both resourceRequest.gpus (Exclusive GPU mode) and " \
+                      "rusage[ngpus_physical] (Shared GPU mode)"
+                self.log.warning(msg)
+                raise ValueError(msg)
 
         #OPTION SET 1
         #FIXME: Setting stdout == stderr for now - implied by not setting anything for stderr

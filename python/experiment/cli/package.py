@@ -20,6 +20,7 @@ from rich.console import Console
 
 from experiment.cli.api import get_api
 from experiment.cli.configuration import Configuration
+from experiment.cli.context import find_context_by_url
 from experiment.cli.exit_codes import STPExitCodes
 from experiment.cli.git import (
     get_git_origin_url,
@@ -86,13 +87,45 @@ def update_commit_in_base_package_for_repo(pvep, origin_url, head_commit):
 
 def get_pvep_from_url(ctx: typer.Context, url: HttpUrl, from_context: Optional[str]):
     config: Configuration = ctx.obj
+    pvep = None
 
     # We assume the URL to be something like
     # https://host/some/path/exp-name#an-optional-anchor
     exp_name = url.path.split("/")[-1]
 
-    # If we have from_context we can log into the API
-    if from_context is not None:
+    # With no context we assume we're accessing a publicly available registry
+    if from_context is None:
+        try:
+            exp_def_address = f"{url.scheme}://{url.host}/registry-ui/backend/experiments/{exp_name}?outputFormat=json&hideMetadataRegistry=y&hideNone=y"
+            result = requests.get(exp_def_address)
+            if result.status_code == 200:
+                pvep = result.json()["entry"]
+            else:
+                context_to_use = find_context_by_url(config.contexts, url)
+                if context_to_use is not None:
+                    stderr.print(
+                        "[yellow]Warn:[/yellow]\tIt appears the package you are trying to download belongs to "
+                        "a private registry but the [blue]--from-context[/blue] flag was not provided.\n"
+                        f"\tBased on the URL, we will attempt to use the [blue]{context_to_use}[/blue] context "
+                        f"for authentication.\n"
+                        f"[italic]Tip:\tNext time include [blue]--from-context {context_to_use}[/blue][/italic]"
+                    )
+                    from_context = context_to_use
+                else:
+                    stderr.print(
+                        f"[red]Error:[/red]\tThe server returned error {result.status_code}\n"
+                        "[italic]Tip:\tIf you're trying to retrieve a PVEP from a private registry, "
+                        "add the [blue]--from-context[/blue] flag and pass the name of the context "
+                        "you want to use to access the data.\n"
+                        "Example:\t[blue]--from-context YOUR_CONTEXT_NAME[/blue][/italic]"
+                    )
+                    raise typer.Exit(STPExitCodes.UNAUTHORIZED)
+        except Exception as e:
+            stderr.print(f"[red]Error:[/red]\tUnable to retrieve experiment: {e}")
+            raise typer.Exit(code=STPExitCodes.IO_ERROR)
+
+    #
+    if from_context is not None and pvep is None:
         context_url = f"{url.scheme}://{url.host}"
         token = keyring.get_password(context_url, from_context)
         if token is None:
@@ -112,24 +145,6 @@ def get_pvep_from_url(ctx: typer.Context, url: HttpUrl, from_context: Optional[s
         except Exception as e:
             stderr.print(f"[red]Error:[/red]\tUnable to retrieve experiment: {e}")
             raise typer.Exit(STPExitCodes.IO_ERROR)
-    # With no context we assume we're accessing a publicly available registry
-    else:
-        try:
-            exp_def_address = f"{url.scheme}://{url.host}/registry-ui/backend/experiments/{exp_name}?outputFormat=json&hideMetadataRegistry=y&hideNone=y"
-            result = requests.get(exp_def_address)
-            if result.status_code != 200:
-                stderr.print(
-                    f"[red]Error:[/red]\tThe server returned error {result.status_code}\n"
-                    "[italic]Tip:\tIf you're trying to retrieve a PVEP from a private registry, "
-                    "add the [blue]--from-context[/blue] flag and pass the name of the context "
-                    "you want to use to access the data.\n"
-                    f"Example:\t[blue]--from-context {config.settings.default_context}[/blue][/italic]"
-                )
-                raise typer.Exit(STPExitCodes.UNAUTHORIZED)
-            pvep = result.json()["entry"]
-        except Exception as e:
-            stderr.print(f"[red]Error:[/red]\tUnable to retrieve experiment: {e}")
-            raise typer.Exit(code=STPExitCodes.IO_ERROR)
 
     return pvep
 

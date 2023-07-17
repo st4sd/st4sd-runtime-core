@@ -2,19 +2,29 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Author: Alessandro Pomponio
+from typing import Optional
 
 import keyring
 import typer
+from pydantic import AnyHttpUrl
 from rich.console import Console
 from rich.table import Table
 
-from experiment.cli.configuration import Configuration, Context
+from experiment.cli.configuration import Configuration, Context, Contexts
 from experiment.cli.exit_codes import STPExitCodes
 
 app = typer.Typer(no_args_is_help=True)
 
 stderr = Console(stderr=True)
 stdout = Console()
+
+
+def find_context_by_url(contexts: Contexts, url: AnyHttpUrl) -> Optional[str]:
+    for context in contexts.entries.values():
+        if context.url.host == url.host:
+            return context.name
+
+    return None
 
 
 @app.command("list", options_metavar="[--show-url] [--simple]")

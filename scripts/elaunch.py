@@ -1367,16 +1367,39 @@ def build_parser() -> NoSystemExitOptparseOptionParser:
     return parser
 
 
-def report_error(instance_path: str | None, error_description: str):
+def report_error(
+    instance: Optional[experiment.model.storage.ExperimentInstanceDirectory],
+    package_path: Optional[str],
+    options: Optional[optparse.Values],
+    error_description: str
+):
     """Generates a Status report in @instance_path/output/status.txt with @error_description
 
     Use this method when there is no other way to load/create the instance directory at @instance_path
 
     Args:
-        instance_path: Path to the instance directory which will hold the status report
+        instance: The instance directory
+        package_path: The path to the package
+        options: The parsed command-line arguments
         error_description: A human readable description of what went wrong
     """
-    if instance_path is None:
+    instance_path: Optional[str] = None
+    if instance is not None:
+        instance_path = instance.location
+    elif options is not None and package_path:
+        package_path = package_path.rstrip(os.path.sep)
+        if options.instance_name:
+            package_name = options.instance_name
+        else:
+            package_name = os.path.basename(package_path)
+
+        if options.stamp:
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H%M%S.%f")
+            instance_path = os.path.abspath('-'.join((package_name, timestamp)))
+        else:
+            instance_path = os.path.abspath(package_name)
+        instance_path += ".instance"
+    else:
         try:
             instance_path = os.environ["INSTANCE_DIR_NAME"]
         except KeyError as e:
@@ -1439,7 +1462,7 @@ if __name__ == "__main__":
         else:
             msg = f"During argument parsing of sys-args {sys.argv}, ran into {type(e).__name__} {e}"
         print(f"{msg} - will try to generate error report", file=sys.stderr)
-        report_error(None, msg)
+        report_error(None, None, None, msg)
         raise
 
     # VV: Elaunch.py supports the definition of default cli-arguments in a file with the format:
@@ -1478,14 +1501,16 @@ if __name__ == "__main__":
         instance_path: str | None = opts_only_cmdline.instance_name
 
         if instance_path is None and len(args) == 1:
-            instance_path = args[0]
-            instance_path = os.path.splitext(instance_path)[0]
+            package_path = args[0]
+            instance_path = os.path.splitext(package_path)[0]
             instance_path = f"{instance_path}.instance"
+        else:
+            package_path = None
 
         if instance_path is not None and os.path.exists(instance_path):
             instance_path = None
 
-        report_error(instance_path, msg)
+        report_error(instance_path, package_path, options, msg)
         raise
 
     #Set umask to 0002 to allow group write
@@ -1691,7 +1716,7 @@ if __name__ == "__main__":
                 error_description = f"{type(initialization_error).__name__} {initialization_error}"
             else:
                 error_description = str(initialization_error)
-            report_error(instance_dir.location if instance_dir else None, error_description)
+            report_error(instance_dir, packagePath, options, error_description)
             if instance_dir:
                 instance_dir.consolidate()
         except Exception as e:

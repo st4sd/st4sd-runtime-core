@@ -15,7 +15,11 @@ import os
 import subprocess
 import sys
 import uuid
-from typing import Optional
+from typing import (
+    Optional,
+    Dict,
+    Any
+)
 
 import experiment.appenv
 import experiment.model.executors
@@ -36,6 +40,8 @@ class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
         label: Optional[str] = None, **kwargs
     ):
         log = logging.getLogger('docker')
+        self.log = log
+
         self.executor = executor
         if not label:
             self._name = f"st4sd-{uuid.uuid1()}"
@@ -51,7 +57,7 @@ class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
         self.pull_policy = pull_policy
 
         if pull_policy == 'Always' or pull_policy == 'IfNotPresent':
-            self.may_pull_image(log)
+            self.may_pull_image(self.log)
 
         # VV: this is initialized by experiment.runtime.backends.InitialiseBackendsForWorkflow()
         config = experiment.appenv.DockerConfiguration.defaultConf
@@ -91,6 +97,18 @@ class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
         self.log = log
         self.log.log(15, "Dockerized command: %s" % self.executor.commandLine)
 
+    def _docker_like_cmd_stdout_toggle(self, log: Optional[logging.Logger]) -> Dict[str, Any]:
+        """Utility method to enable/disable logging of the stdout for the docker-like method depending
+        on the log level of a python logger"""
+
+        # VV: If the user expects a log-level that's below info also display the stdout of the docker-like cmds
+        # else, hide it by redirecting the stream to /dev/null
+        if log.getEffectiveLevel() >= logging.INFO:
+            return {'stdout': subprocess.DEVNULL}
+
+        return {}
+
+
     def may_pull_image(self, log: logging.Logger):
         if_not_present = (self.pull_policy=='IfNotPresent')
         do_pull = not if_not_present
@@ -108,7 +126,8 @@ class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
                 cmd_pull = f"{self.executor.executable} pull --platform={self.executor.platform} {self.executor.image}"
             else:
                 cmd_pull = f"{self.executor.executable} pull {self.executor.image}"
-            pull = subprocess.Popen( cmd_pull, shell=True, stderr=subprocess.PIPE)
+            pull = subprocess.Popen( cmd_pull, shell=True, stderr=subprocess.PIPE,
+                                     **self._docker_like_cmd_stdout_toggle(log))
             pull_code = pull.wait()
             if pull_code != 0:
                 raise FailedToPull(
@@ -133,28 +152,38 @@ class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
         idx = self.schedulingData.indexOfColumnWithHeader('epoch-finished')
         self.schedulingData.matrix[0][idx] = self._z_finished_date.strftime("%d%m%y-%H%M%S")
 
-        # VV: this is initialized by experiment.runtime.backends.InitialiseBackendsForWorkflow()
-        config = experiment.appenv.DockerConfiguration.defaultConf
-        garbage_collect = "none"
-
         # VV: Garbage collect Containers based on the DockerConfiguration settings
         if "--rm" not in self.executor.runArguments:
-            if config:
-                garbage_collect = config.garbage_collect
-            msg = f"Deleting container {self._name} because dockerConf.garbage_collect={garbage_collect}"
-            if garbage_collect == "successful" and exit_code == 0:
-                self.log.log(15, msg)
-                subprocess.Popen(f"{self.executor.executable} rm -f {self._name}", shell=True).wait()
-            elif garbage_collect == "failed" and exit_code is not None and exit_code != 0:
-                self.log.log(15, msg)
-                subprocess.Popen(f"{self.executor.executable} rm -f {self._name}", shell=True).wait()
+            self._may_garbage_collect(exit_code=exit_code)
 
         # VV: Wake up whoever is blocked at .wait()
         self._z_wait_event.set()
 
     def kill(self):
-        if self._name:
-            subprocess.Popen(args=f"{self.executor.executable} stop {self._name}", shell=True).wait()
+        if self._name and self.returncode is None:
+            subprocess.Popen(args=f"{self.executor.executable} stop {self._name}", shell=True,
+                             **self._docker_like_cmd_stdout_toggle(self.log)).wait()
+            self._may_garbage_collect(1, force=True)
+
+    def _may_garbage_collect(self, exit_code: Optional[int], force: bool = False):
+        # VV: this is initialized by experiment.runtime.backends.InitialiseBackendsForWorkflow()
+        config = experiment.appenv.DockerConfiguration.defaultConf
+
+        garbage_collect = "none"
+        if config:
+            garbage_collect = config.garbage_collect
+        msg = f"Deleting container {self._name} because dockerConf.garbage_collect={garbage_collect} and force={force}"
+
+        if (
+            force or
+            garbage_collect == "all" or
+            (garbage_collect == "successful" and exit_code == 0) or
+            (garbage_collect == "failed" and exit_code != 0)
+        ):
+            self.log.log(15, msg)
+            subprocess.Popen(f"{self.executor.executable} rm -f {self._name}", shell=True,
+                             **self._docker_like_cmd_stdout_toggle(self.log)).wait()
+
 
     def get_referenced_image_ids(self):
         image = self.executor.image

@@ -654,15 +654,15 @@ class Controller:
     def disable_optimizer(self, which):
         #  type: (Union[ComponentState, experiment.runtime.engine.Engine, List[str], None]) -> None
         if isinstance(which, experiment.runtime.workflow.ComponentState):
-            self.log.critical("Disabling optimizer because of error in ComponentState %s" %
+            self.log.warning("Disabling optimizer because of error in ComponentState %s" %
                               which.specification.reference)
         elif isinstance(which, experiment.runtime.engine.Engine):
-            self.log.critical("Disabling optimizer because of error in Engine %s" %
+            self.log.warning("Disabling optimizer because of error in Engine %s" %
                               which.job.reference)
-        elif which != None:
-            self.log.critical("Disabling optimizer because %s" % which)
+        elif which is not None:
+            self.log.warning("Disabling optimizer because %s" % which)
         else:
-            self.log.critical("Disabling optimizer because of error(s) in (?)" )
+            self.log.warning("Disabling optimizer because of error(s) in (?)" )
 
         with self.opt_lock:
             self.enable_optimizer = False

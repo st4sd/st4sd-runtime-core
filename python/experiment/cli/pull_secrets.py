@@ -98,6 +98,7 @@ def list_image_pull_secrets(
     "[--token-file <file>] "
     "[-t | --access-token | --token <token>] "
     "[--username-not-required]",
+    no_args_is_help=True,
 )
 def add_image_pull_secret(
     ctx: typer.Context,

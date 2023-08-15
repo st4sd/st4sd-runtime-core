@@ -37,6 +37,7 @@ app.command(
     "[--force] "
     "[--no-set-default] "
     "[-v | --verbose]",
+    no_args_is_help=True,
 )(login.login)
 
 # Add subcommands from different file

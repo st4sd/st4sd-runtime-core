@@ -76,7 +76,7 @@ def list_contexts(
     stdout.print(contexts_table)
 
 
-@app.command()
+@app.command(no_args_is_help=True)
 def activate(
     ctx: typer.Context,
     name: str = typer.Argument(
@@ -129,7 +129,7 @@ def show(
         stdout.print(config.settings.default_context)
 
 
-@app.command(options_metavar="--to <name>")
+@app.command(options_metavar="--to <name>", no_args_is_help=True)
 def rename(
     ctx: typer.Context,
     original_name: str = typer.Argument(
@@ -177,7 +177,7 @@ def rename(
     stdout.print("[green]Success![/green]")
 
 
-@app.command(options_metavar="[-v | --verbose]")
+@app.command(options_metavar="[-v | --verbose]", no_args_is_help=True)
 def delete(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="The context to delete.", show_default=False),

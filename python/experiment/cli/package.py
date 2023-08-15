@@ -162,7 +162,8 @@ def output_format_callback(chosen_format: str):
     options_metavar="[--tag <name>] "
     "[--update-package-definition] "
     "[--use-latest-commit] "
-    "[-v | --verbose]"
+    "[-v | --verbose]",
+    no_args_is_help=True,
 )
 def push(
     ctx: typer.Context,
@@ -245,6 +246,7 @@ def push(
     options_metavar="[--from-context <name>] "
     "[--to-folder <path>] "
     "[--output-format <json|yaml>]",
+    no_args_is_help=True,
 )
 def download_experiment(
     ctx: typer.Context,
@@ -310,6 +312,7 @@ def download_experiment(
 @app.command(
     "import",
     options_metavar="[--from-context <name>] [-v | --verbose]",
+    no_args_is_help=True,
 )
 def import_experiment(
     ctx: typer.Context,
@@ -373,7 +376,8 @@ def import_experiment(
     options_metavar="--path <path> "
     "[--tag <name>] "
     "[-o | --output <path>]"
-    "[--use-latest-commit]"
+    "[--use-latest-commit]",
+    no_args_is_help=True,
 )
 def update_definition(
     ctx: typer.Context,
@@ -601,7 +605,7 @@ def create_package(
     stdout.print(f"[green]Success![/green] PVEP saved as {output_file}")
 
 
-@app.command(options_metavar="[--schema-path <path>]")
+@app.command(options_metavar="[--schema-path <path>]", no_args_is_help=True)
 def test(
     ctx: typer.Context,
     path: Path = typer.Argument(

@@ -3,6 +3,9 @@
 
 from __future__ import print_function
 
+import os
+
+import pydantic
 import pytest
 
 import experiment.model.codes
@@ -219,3 +222,66 @@ def test_component_external_finish_running(components, componentReference):
     logger.info('Unsubscription test successful: postMortem observable did not emit')
     assert c.state == experiment.model.codes.FAILED_STATE
     logger.info('External finish path test successful: state correctly set asynchronously')
+
+
+def test_component_load_default_environment(output_dir: str):
+    flowir = """
+    environments:
+      default:
+        environment:
+          DEFAULTS: PATH:LD_LIBRARY_PATH
+          HELLO: world
+    
+    components:
+    - name: dummy
+      command:
+        executable: echo
+        arguments: ${HELLO}
+    """
+
+    comp_exp = utils.experiment_from_flowir(flowir, output_dir)
+
+    stage = next(comp_exp.stages())
+    job = stage.jobs()[0]
+    comp = experiment.runtime.workflow.ComponentState(job, comp_exp.experimentGraph)
+
+    assert comp.specification.environment['HELLO'] == 'world'
+
+
+@pytest.fixture(scope="function")
+def ctx_env_var_to_use_as_seed() -> str:
+    assert 'st4sd_env_var_to_use_as_a_seed' not in os.environ
+
+    os.environ['st4sd_env_var_to_use_as_a_seed'] = "defaults"
+
+    yield os.environ['st4sd_env_var_to_use_as_a_seed']
+
+    del os.environ['st4sd_env_var_to_use_as_a_seed']
+
+
+def test_component_use_defaults_env_var(output_dir: str, ctx_env_var_to_use_as_seed: str):
+    flowir = """
+        environments:
+          default:
+            environment:
+              DEFAULTS: PATH:st4sd_env_var_to_use_as_a_seed
+              a_before_st4sd_env_var: "prefix:$st4sd_env_var_to_use_as_a_seed"
+              st4sd_env_var_to_use_as_a_seed: "$st4sd_env_var_to_use_as_a_seed:environment"
+              z_after_st4sd_env_var: "prefix:$st4sd_env_var_to_use_as_a_seed" 
+
+        components:
+        - name: dummy
+          command:
+            executable: echo
+            arguments: ${HELLO}
+        """
+
+    comp_exp = utils.experiment_from_flowir(flowir, output_dir)
+
+    stage = next(comp_exp.stages())
+    job = stage.jobs()[0]
+    comp = experiment.runtime.workflow.ComponentState(job, comp_exp.experimentGraph)
+
+    assert comp.specification.environment['st4sd_env_var_to_use_as_a_seed'] == 'defaults:environment'
+    assert comp.specification.environment['a_before_st4sd_env_var'] == 'prefix:defaults:environment'
+    assert comp.specification.environment['z_after_st4sd_env_var'] == 'prefix:defaults:environment'

@@ -1092,7 +1092,7 @@ def arg_to_bool(name, val):
 
 
 def build_parser() -> NoSystemExitOptparseOptionParser:
-    import pkg_resources
+    import importlib_metadata
 
     # HACK: Daresbury system dependant
     projectDir = os.path.split(os.path.expanduser("~"))[0]
@@ -1100,7 +1100,7 @@ def build_parser() -> NoSystemExitOptparseOptionParser:
     killfile = os.path.join(projectDir, 'shared/CHPCBackend/.kill_backend')
 
     parser = NoSystemExitOptparseOptionParser(
-        usage=usage, version=pkg_resources.get_distribution("st4sd-runtime-core").version, description=__doc__)
+        usage=usage, version=importlib_metadata.version(distribution_name="st4sd-runtime-core"), description=__doc__)
 
     launchOptions = optparse.OptionGroup(parser, "Launch Options")
     parser.add_option_group(launchOptions)

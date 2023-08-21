@@ -24,7 +24,7 @@ import experiment.model.errors
 import experiment.runtime.output
 import experiment.model.frontends.flowir
 import experiment.model.storage
-import pkg_resources
+import importlib_metadata
 import yaml
 
 usage = "usage: %prog [options] [package]"
@@ -192,7 +192,7 @@ def main():
 
     log.info(f"Generating {options.outputPath}/elaunch.yaml")
 
-    elaunch_version = pkg_resources.get_distribution("st4sd-runtime-core").version
+    elaunch_version = importlib_metadata.version(distribution_name="st4sd-runtime-core")
     actual_variables = concrete.get_workflow_variables()
     # VV: 'global' userMetadata variables end up becoming `platform-stage` variables (this is the second most
     # high priority scope right after variables defined by components). As a result, we need to backpatch them

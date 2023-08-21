@@ -1317,15 +1317,16 @@ class FlowIR(object):
         'blueprint', 'platforms', 'virtual-environments',
         'version', 'interface'
     )
-    LabelGlobal, LabelDefault, LabelStages, LabelDoWhile, LabelWorkflow = (
-        'global', 'default', 'stages', 'DoWhile', 'Workflow'
+    LabelGlobal, LabelDefault, LabelStages, LabelDoWhile, LabelWorkflow, LabelEnvironmentDefaults = (
+        'global', 'default', 'stages', 'DoWhile', 'Workflow', 'DEFAULTS'
     )
 
     LabelKubernetesQosGuaranteed, LabelKubernetesQosBurstable, LabelKubernetesQosBestEffort = (
         'guaranteed', 'burstable', 'besteffort'
     )
 
-    SpecialEnvironments = ['SANDBOX', 'ENVIRONMENT']
+    EnvironmentsSpecial = ['environment', 'none']
+    EnvironmentsReserved = ['none']
 
     SpecialFolders = ['input', 'data', 'bin', 'conf']
 
@@ -5472,8 +5473,10 @@ class FlowIRConcrete(object):
         try:
             environment = platform_environments[name]
         except KeyError:
-            # VV: It's valid for an environment to be global (i.e. non-platform specific)
-            if default_environment is None or strict_checks is True:
+            # VV: Raise an exception if this is the default value, or the environment doesn't exist neither for this
+            # platform, nor the default platform, or the environment exists in the default platform, but not this one.
+            # i.e. It's valid for an environment to be inherited from the default platform if strict_checks=False
+            if platform == FlowIR.LabelDefault or default_environment is None or strict_checks is True:
                 raise experiment.model.errors.FlowIREnvironmentUnknown(
                     name, platform, self._flowir
                 )

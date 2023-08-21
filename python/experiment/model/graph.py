@@ -2657,8 +2657,7 @@ class WorkflowGraph(object):
         return self.configuration.get_flowir_concrete(return_copy=False)
 
     @property
-    def configuration(self):
-        # type: () -> FlowIRExperimentConfiguration
+    def configuration(self) -> FlowIRExperimentConfiguration:
         return self._flowir_configuration
 
     def get_stage_description(self, stage_index):
@@ -3325,8 +3324,7 @@ class WorkflowGraph(object):
         inputEdges = networkx.reverse(self.graph).edges(nodeName)
         return [el[1] for el in inputEdges]
 
-    def environmentForNode(self, nodeName):
-        # type: (str) -> Dict[str, str]
+    def environmentForNode(self, nodeName: str) -> Dict[str, str]:
         """Build environment for node.
 
         If a component uses the `none` environment we assume that the environment is just {}.

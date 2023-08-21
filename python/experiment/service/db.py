@@ -94,7 +94,7 @@ import pymongo.errors
 try:
     import tinydb
 except ImportError:
-    logging.getLogger().warning("Unable to import tinydb module - tinydb interface not available")
+    logging.getLogger().debug("Unable to import tinydb module - tinydb interface not available")
 
 # VV: Suppress warnings about contacting a https URL that uses self-verified TLS
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)

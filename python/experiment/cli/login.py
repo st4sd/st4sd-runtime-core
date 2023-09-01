@@ -16,10 +16,8 @@ from pydantic import HttpUrl, ValidationError
 from rich.console import Console
 from rich.prompt import Prompt
 
-import experiment.service.db
 from experiment.cli.configuration import Configuration, Context
 from experiment.cli.exit_codes import STPExitCodes
-from experiment.service.errors import UnauthorisedRequest
 
 stderr = Console(stderr=True)
 stdout = Console()
@@ -164,6 +162,8 @@ def login(
                 raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
 
     # Attempt login
+    import experiment.service.db
+    from experiment.service.errors import UnauthorisedRequest
     try:
         experiment.service.db.ExperimentRestAPI(
             url, max_retries=2, secs_between_retries=1, cc_auth_token=access_token

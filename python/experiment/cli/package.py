@@ -29,7 +29,6 @@ from experiment.cli.git import (
     get_alternative_git_url,
 )
 from experiment.cli.pull_secrets import check_stack_has_pull_secrets_for_pvep_images
-from experiment.model.storage import ExperimentPackage
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -501,6 +500,7 @@ def create_package(
             )
             raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
 
+    from experiment.model.storage import ExperimentPackage
     if manifest is None:
         experiment_package: ExperimentPackage = ExperimentPackage.packageFromLocation(
             location=str(path)

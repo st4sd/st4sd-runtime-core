@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Author: Alessandro Pomponio
+from __future__ import annotations
 
 import pathlib
 import sys
@@ -16,7 +17,10 @@ from rich.table import Table
 
 from experiment.cli.api import get_api
 from experiment.cli.exit_codes import STPExitCodes
-from experiment.service.db import ExperimentRestAPI
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from experiment.service.db import ExperimentRestAPI
 
 app = typer.Typer(no_args_is_help=True)
 

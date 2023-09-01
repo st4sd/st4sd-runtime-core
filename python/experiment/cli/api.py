@@ -7,9 +7,6 @@ import keyring
 import typer
 from rich.console import Console
 
-import experiment
-import experiment.service.db
-import experiment.service.errors
 from experiment.cli.configuration import Configuration
 from experiment.cli.exit_codes import STPExitCodes
 
@@ -54,6 +51,8 @@ def get_api(ctx: typer.Context, for_context: str = None):
         raise typer.Exit(code=STPExitCodes.CONTEXT_ERROR)
 
     # Attempt login to check credentials still work
+    import experiment.service.db
+    import experiment.service.errors
     try:
         api = experiment.service.db.ExperimentRestAPI(
             url, max_retries=2, secs_between_retries=1, cc_auth_token=token

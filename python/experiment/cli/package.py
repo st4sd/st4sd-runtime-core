@@ -512,6 +512,14 @@ def create_package(
 
     # Base package
     origin_url = get_git_origin_url(path)
+    # We only support https URLs for cloning
+    if origin_url.startswith("git@"):
+        origin_url = get_alternative_git_url(origin_url)
+        stderr.print(
+            "[yellow]Warn:[/yellow]\t"
+            "ST4SD does not support SSH URLs for cloning packages.\n"
+            f"\tThe clone URL for the PVEP has been converted to: {origin_url}"
+        )
     commit_id = get_git_head_commit(path)
     toplevel_git_path = Path(get_git_toplevel_path(path))
     name = origin_url.split("/")[-1]

@@ -351,7 +351,9 @@ class FlowIRExperimentConfiguration:
                 with open(self._path_package_yaml, 'w') as f:
                     experiment.model.frontends.flowir.yaml_dump(pretty_primitive, f, sort_keys=False, default_flow_style=False)
 
-            self._concrete = concrete or FlowIRExperimentConfiguration._NoFlowIR
+            self._concrete: experiment.model.frontends.flowir.FlowIRConcrete = (
+                    concrete or FlowIRExperimentConfiguration._NoFlowIR
+            )
             self._initialize(out_errors)
         except (experiment.model.errors.ExperimentMissingConfigurationError,
                 experiment.model.errors.ExperimentInvalidConfigurationError) as e:
@@ -995,7 +997,7 @@ class FlowIRExperimentConfiguration:
         # VV: Validate after replicating because of `replica` variables
         try:
             if (self._concrete != FlowIRExperimentConfiguration._NoFlowIR) or (len(out_errors) == 0):
-                out_errors.extend(self._concrete.validate(self.top_level_folders))
+                out_errors.extend(self._concrete.validate(top_level_folders=self.top_level_folders))
         except Exception as e:
             self.log.debug(f"Unexpected error while validating {e} -- traceback:\n{traceback.format_exc()}")
             out_errors.append(e)
@@ -1230,7 +1232,6 @@ class FlowIRExperimentConfiguration:
         self,
         environment_name: Optional[str],
         expand: bool = True,
-        strict_checks: bool = True,
         remove_defaults_key: bool = True,
     ) -> Dict[str, str]:
         """Build environment with a specific name.
@@ -1263,7 +1264,6 @@ class FlowIRExperimentConfiguration:
                 in the environment right before returning the dictionary and then use the env-vars of the active
                 shell environment to potentially expand more variables. References to env-vars which are neither in the
                 environment, nor the active shell environment are left as is.
-            strict_checks: when True, raises an error if the selected platform does not contain the environment
             remove_defaults_key: If True, remove the DEFAULTS special key from the environment after processing it
         """
         default_env = self.defaultEnvironment()
@@ -1285,16 +1285,14 @@ class FlowIRExperimentConfiguration:
             # VV: This is some named environment
             try:
                 try:
-                    flowir_env_vars = self._concrete.get_environment(
-                        environment_name, strict_checks=strict_checks
-                    )
+                    flowir_env_vars = self._concrete.get_environment(environment_name)
                 except experiment.model.errors.FlowIREnvironmentUnknown as e:
                     # VV: if this is not the default platform then attempt to find the environment
                     #     in the default platform too
                     default_platform = experiment.model.frontends.flowir.FlowIR.LabelDefault
                     if self._platform != default_platform:
                         flowir_env_vars = self._concrete.get_environment(
-                            environment_name, platform=default_platform, strict_checks=strict_checks
+                            environment_name, platform=default_platform
                         )
                     else:
                         raise
@@ -1353,7 +1351,7 @@ class FlowIRExperimentConfiguration:
 
     def defaultEnvironment(self, fill_when_unset: bool = True) -> Dict[str, str]:
         try:
-            config_env = self._concrete.get_environment('environment', strict_checks=True)
+            config_env = self._concrete.get_environment('environment')
         except experiment.model.errors.FlowIREnvironmentUnknown:
             if fill_when_unset:
                 log = logging.getLogger('Environment')

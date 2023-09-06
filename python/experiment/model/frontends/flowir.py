@@ -1928,11 +1928,10 @@ class FlowIR(object):
             environments = ret.flowir[cls.FieldEnvironments]
 
             for platform in environments:
-                platform_environments = environments[platform]
+                platform_environments = environments[platform] or {}
 
                 for name in list(platform_environments.keys()):
                     if name != name.lower():
-                        assert name.lower() not in platform_environments
                         platform_environments[name.lower()] = platform_environments[name]
                         del platform_environments[name]
 
@@ -2843,8 +2842,11 @@ class FlowIR(object):
         return errors
 
     @classmethod
-    def validate(cls, flowir, documents):
-        # type: (Union[FlowIR, DictFlowIR], Dict[str, Dict[str, Dict[str, Any]]]) -> List[Exception]
+    def validate(
+        cls,
+        flowir: Union[FlowIR, DictFlowIR],
+        documents: Dict[str, Dict[str, Dict[str, Any]]]
+    ) -> List[Exception]:
         if isinstance(flowir, FlowIR):
             flowir = deep_copy(flowir.flowir)
         elif isinstance(flowir, dict) is False:
@@ -2863,6 +2865,26 @@ class FlowIR(object):
 
         errors_is_list = validate_object_schema(components, ValidateMany(dict), 'FlowIR.components')
         errors.extend(errors_is_list)
+
+
+        if isinstance(flowir, dict):
+            environments = flowir.get(cls.FieldEnvironments, {})
+            if isinstance(environments, dict):
+                for platform_name, platform_envs in environments.items():
+                    if not isinstance(platform_envs, dict):
+                        # VV: The validate_object_schema() call above will handle this case
+                        continue
+
+                    for name, env_vars in platform_envs.items():
+                        if isinstance(name, str):
+                            if name.lower() in ['', 'none']:
+                                errors.append(experiment.model.errors.FlowExceptionWithMessageError(
+                                    f"The environment {name} in platform {platform_name} has an invalid name"
+                                ))
+                        elif name is None:
+                            errors.append(experiment.model.errors.FlowExceptionWithMessageError(
+                                f"The platform {platform_name} defines an environment whose name is None (null)"
+                            ))
 
         if errors_is_list:
             type_component = cls.type_flowir_component(flavor='blueprint')
@@ -4793,12 +4815,11 @@ class FlowIRConcrete(object):
         else:
             return self._flowir.get(FlowIR.FieldInterface)
 
-    def validate(self, top_level_folders=None):
-        # type: (Optional[List[str]]) -> List[experiment.model.errors.FlowIRException]
+    def validate(self, top_level_folders: Optional[List[str]] = None)-> List[experiment.model.errors.FlowIRException]:
         """Validate a FlowIR definition
 
-        Arguments:
-            top_level_foolders: (optional) a list of names of folders that are in the root-directory of the
+        args:
+            top_level_folders: (optional) a list of names of folders that are in the root-directory of the
                package/instance
         
         Returns
@@ -4823,6 +4844,8 @@ class FlowIRConcrete(object):
         top_level_folders.extend(map(FlowIR.application_dependency_to_name, self.get_application_dependencies()))
 
         for comp_id in component_identifiers:
+            comp_ref = f"stage{comp_id[0]}.{comp_id[1]}"
+
             try:
                 comp = self.get_component(comp_id)
                 # VV: Validate the raw definition of import components and the
@@ -4832,35 +4855,50 @@ class FlowIRConcrete(object):
                     comp = self.get_component_configuration(
                         comp_id, include_default=True, is_primitive=True, raw=False)
             except Exception as e:
-                out_errors.append(e)
+                out_errors.append(experiment.model.errors.FlowIRInconsistency(
+                    reason=f"unable to get the component definition for component {comp_ref}",
+                    flowir=self._flowir,
+                    exception=e
+                ))
             else:
                 comp_errors = FlowIR.validate_component(
                     comp, comp_schema=comp_schema, component_ids=all_identifiers, known_platforms=platforms,
                     top_level_folders=top_level_folders)
 
+                if '$import' in comp:
+                    # VV: The $import-style "component-like" dictionaries are not actual components, they just
+                    # import other documents, we can skip the below checks
+                    continue
+
                 out_errors.extend(comp_errors)
-                env_name = comp.get('command', {}).get('environment', '').lower()
-                if env_name not in ['', 'none']:
+                env_name = comp.get('command', {}).get('environment')
+                if not isinstance(env_name, str) and env_name is not None:
+                    out_errors.append(experiment.model.errors.FlowIRSyntaxException(
+                        f"The component {comp_ref} references an environment which is not "
+                        f"a string but a {type(env_name)}"
+                    ))
+                    continue
+                if env_name is None:
+                    continue
+
+                if env_name.lower() not in ['', 'none', 'environment']:
                     # VV: `None` and `''` resolves to the environment variables of the workflow orchestrator process
                     # `"environment" resolves to the "environment" environment in the active platform, if not specified
-                    #   it resolves to an empty set of environmetns
+                    #   it resolves to an empty set of environments
                     # `"none"` resolves to an EMPTY set of environment variables
-                    # others resolve to the environment name
+                    # any other environment **must** be visible to the platform i.e. either the platform explicitly
+                    # defines it, or it inherits it from the `default` platform
                     try:
-                        _ = self.get_environment(env_name, strict_checks=True)
-                    except experiment.model.errors.FlowIREnvironmentUnknown as e:
-                        # VV: environments are also inheritted, if `env_name` is not defined for active platform,
-                        # look for it in the default platform before registering that this is an unknown environment
-                        if e.platform != FlowIR.LabelDefault:
-                            try:
-                                _ = self.get_environment(env_name, strict_checks=False)
-                            except experiment.model.errors.FlowIREnvironmentUnknown as e:
-                                flowirLogger.info(self.environments())
-                                out_errors.append(e)
-                        else:
-                            out_errors.append(e)
-                    except Exception as e:
+                        _ = self.get_environment(env_name)
+                    except experiment.model.errors.FlowIRException as e:
                         out_errors.append(e)
+                    except Exception as e:
+                        out_errors.append(experiment.model.errors.FlowIRInconsistency(
+                            reason=f"unable to get environment {env_name} for component {comp_ref} "
+                                   f"in platform {self._platform}",
+                            flowir=self._flowir,
+                            exception=e
+                        ))
 
         return out_errors
 
@@ -5450,50 +5488,96 @@ class FlowIRConcrete(object):
         platform_environments = deep_copy(platform_environments)
         return platform_environments
 
-    def get_environment(
-            self,
-            name: str,
-            platform: str | None = None,
-            strict_checks: bool = False,
-    ) -> Dict[str, str]:
-        platform = platform or self._platform
+    def get_platform_environment(self, name: str, platform: str) -> Dict[str, str]:
+        """Returns the environment that a platform explicitly defines, does not fallback to the default platform.
 
+        Args:
+            name: the name of the environment
+            platform: the name of the platform
+
+        Returns:
+            The contents of the environment
+
+        Raises:
+            experiment.model.errors.FlowIRPlatformUnknown: If the platform does not exist
+            experiment.model.errors.FlowIREnvironmentUnknown: If the platform does not explicitly define the environment
+        """
         platform_environments = self.get_environments(platform)
 
         name = name.lower()
-
-        if platform != FlowIR.LabelDefault:
-            try:
-                default_environment = self.get_environment(name, FlowIR.LabelDefault)
-            except experiment.model.errors.FlowIREnvironmentUnknown:
-                default_environment = None
-        else:
-            default_environment = {}
+        if name == "none":
+            return {}
 
         try:
             environment = platform_environments[name]
         except KeyError:
-            # VV: Raise an exception if this is the default value, or the environment doesn't exist neither for this
-            # platform, nor the default platform, or the environment exists in the default platform, but not this one.
-            # i.e. It's valid for an environment to be inherited from the default platform if strict_checks=False
-            if platform == FlowIR.LabelDefault or default_environment is None or strict_checks is True:
-                raise experiment.model.errors.FlowIREnvironmentUnknown(
-                    name, platform, self._flowir
-                )
-            else:
-                environment = {}
-
-        default_environment = default_environment or {}
-        default_environment.update(environment)
+            # VV: Raise an exception if the platform does not explicitly define the requested environment
+            raise experiment.model.errors.FlowIREnvironmentUnknown(name=name, platform=platform, flowir=self._flowir)
 
         def env_value_to_string(value: Any) -> str:
             if value is None:
                 return ""
             return str(value)
 
-        default_environment = {str(x): env_value_to_string(default_environment[x]) for x in default_environment}
+        return {str(x): env_value_to_string(environment[x]) for x in environment}
 
-        return default_environment
+    def get_environment(
+            self,
+            name: str,
+            platform: str | None = None,
+    ) -> Dict[str, str]:
+        """Returns the contents of an environment that is visible to a platform
+
+        If the platform is not `default` it also grabs the environment from the default platform and layers it on
+        top of it.
+
+        Args:
+            name: the environment name
+            platform: the name of the platform, when undefined it defaults to the active platform name
+
+        Returns:
+            The contents of the environment
+
+        Raises:
+            experiment.model.errors.FlowIRPlatformUnknown: If the platform does not exist
+            experiment.model.errors.FlowIREnvironmentUnknown: If the environment is not visible to the platform
+        """
+        if platform is None:
+            platform = self._platform
+
+        try:
+            platform_env = self.get_platform_environment(name=name, platform=platform)
+        except experiment.model.errors.FlowIREnvironmentUnknown:
+            if platform != FlowIR.LabelDefault:
+                platform_env = None
+            else:
+                raise
+
+        if platform != FlowIR.LabelDefault:
+            try:
+                platform_default = self.get_platform_environment(name=name, platform=FlowIR.LabelDefault)
+            except experiment.model.errors.FlowIREnvironmentUnknown:
+                if platform_env is not None:
+                    # VV: It's OK for the default platform to not contain the environment if the @platform
+                    # already has it
+                    platform_default = {}
+                else:
+                    raise experiment.model.errors.FlowIREnvironmentUnknown(
+                        name=name,
+                        platform=platform,
+                        flowir=self._flowir,
+                    )
+
+        else:
+            platform_default = {}
+
+        # VV: Layer the contents of the environment that the platform defines on top of the environment that the
+        # "default" platform defines. This seems a bit weird, but we've always done this since the DOSINI ages.
+        environment = platform_default
+        environment.update(platform_env or {})
+
+        return environment
+
 
     def set_environment(
             self,  # type: FlowIRConcrete
@@ -5516,9 +5600,14 @@ class FlowIRConcrete(object):
         platform = platform or self._platform
         name = name.lower()
         try:
-            _ = self.get_environment(name, platform, strict_checks=True)
+            _ = self.get_platform_environment(name=name, platform=platform)
         except experiment.model.errors.FlowIREnvironmentUnknown:
-            # VV: this is a brand new environment
+            if FlowIR.FieldEnvironments not in self._flowir:
+                self._flowir[FlowIR.FieldEnvironments] = {}
+
+            if platform not in self._flowir[FlowIR.FieldEnvironments]:
+                self._flowir[FlowIR.FieldEnvironments][platform] = {}
+
             self._flowir[FlowIR.FieldEnvironments][platform][name] = environment
         else:
             raise experiment.model.errors.FlowIREnvironmentExists(name, platform, self._flowir)

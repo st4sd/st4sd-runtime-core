@@ -54,6 +54,7 @@ def experiment_from_flowir(
         checkExecutables=True,
         inputs: List[str] | None = None,
         override_data: List[str] | None = None,
+        platform: Optional[str] = None,
 ) -> experiment.model.data.Experiment:
     package_path = os.path.join(location, '%s.package' % str(uuid.uuid4()))
     dir_conf = os.path.join(package_path, 'conf')
@@ -66,9 +67,10 @@ def experiment_from_flowir(
     populate_files(package_path, extra_files)
 
     os.chdir(os.path.expanduser('~'))
-    experiment_package = experiment.model.storage.ExperimentPackage.packageFromLocation(package_path)
+    experiment_package = experiment.model.storage.ExperimentPackage.packageFromLocation(package_path, platform=platform)
     exp = experiment.model.data.Experiment.experimentFromPackage(
-        experiment_package, location=location, variable_files=variable_files, inputs=inputs, data=override_data)
+        experiment_package, location=location, variable_files=variable_files, inputs=inputs, data=override_data,
+        platform=platform)
     exp.validateExperiment(checkExecutables=checkExecutables)
     return exp
 

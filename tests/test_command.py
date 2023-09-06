@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import experiment.model.executors
+import experiment.model.errors
 
 from .reactive_testutils import *
 
@@ -202,3 +203,129 @@ def test_environment_override_defaults(output_dir: str):
 
     assert env['BASE_DIR'] == '/foo/bar'
     assert env['FORCEFIELD_DIR'] == '/foo/bar/forcefield'
+
+
+def test_inherited_default_environment_in_platforms(output_dir: str):
+    import random
+    import string
+    custom_name = ''.join([random.choice(string.digits + string.ascii_letters) for _ in range(30)])
+
+    assert custom_name not in os.environ
+
+    flowir = f"""
+    environments:
+      default:
+          environment:
+            DEFAULTS: PATH:LD_LIBRARY_PATH
+            PATH: hello:$PATH
+            LD_LIBRARY_PATH: $LD_LIBRARY_PATH
+            # VV: Test that "custom" env-vars which we don't even partially build from the active-shell also behave 
+            # in the expected way
+            {custom_name}: text
+
+    platforms:
+    - default
+    - empty
+
+    components:
+    - stage: 0
+      name: env-test
+      command:
+        executable: sh
+        arguments: |
+          -c "
+          if [[ \"${{PATH}}\" =~ ^hello: ]]; then 
+            echo Correct;
+          else
+            echo Wrong;
+            exit 1;
+          fi
+          "
+        environment: "environment"
+        expandArguments: none
+    """
+
+    # VV: Double check that the `default` platform also behaves right
+    exp = experiment_from_flowir(flowir, output_dir, platform="default")
+    conf: experiment.model.data.ComponentSpecification = exp.graph.nodes['stage0.env-test']['componentSpecification']
+
+    env = conf.environment
+
+    assert env['PATH'].startswith("hello:")
+    assert env[custom_name] == 'text'
+
+    # VV: This is the meat of the test - make sure the "empty" platform receives the right environment
+    exp = experiment_from_flowir(flowir, output_dir, platform="empty")
+    conf: experiment.model.data.ComponentSpecification = exp.graph.nodes['stage0.env-test']['componentSpecification']
+
+    env = conf.environment
+
+    assert env['PATH'].startswith("hello:")
+    assert env[custom_name] == 'text'
+
+
+def test_auto_generated_default_env(output_dir: str):
+    flowir = """
+    components:
+    - name: hello
+      command:
+        environment: environment
+        executable: echo
+        arguments: "${PATH}"
+    """
+
+    exp = experiment_from_flowir(flowir, output_dir)
+    conf: experiment.model.data.ComponentSpecification = exp.graph.nodes['stage0.hello']['componentSpecification']
+
+    env = conf.environment
+
+    assert env['PATH'] == os.environ['PATH']
+
+
+def test_env_not_in_default_platform(output_dir: str):
+    import random
+    import string
+    custom_name = ''.join([random.choice(string.digits + string.ascii_letters) for _ in range(30)])
+
+    assert custom_name not in os.environ
+
+    flowir = f"""
+    environments:
+      custom:
+        platform:
+            DEFAULTS: PATH:LD_LOBRARY_PATH
+            {custom_name}: text
+
+    components:
+    - name: hello
+      command:
+        environment: platform
+        executable: echo
+        arguments: "${{{custom_name}}}"
+    """
+
+    exp = experiment_from_flowir(flowir, output_dir, platform='custom')
+    conf: experiment.model.data.ComponentSpecification = exp.graph.nodes['stage0.hello']['componentSpecification']
+
+    env = conf.environment
+
+    assert env[custom_name] == "text"
+
+    # VV: Repeat the above test but for the `default` platform - we should get an exception that the
+    # default platform is invalid because one of the components references an environment which the default platform
+    # doesn't know about.
+    with pytest.raises(experiment.model.errors.ExperimentInvalidConfigurationError) as e:
+        _ = experiment_from_flowir(flowir, output_dir, platform='default')
+
+    exc = e.value
+
+    assert len(exc.underlyingErrors()) == 1
+    underlying = exc.underlyingErrors()[0]
+    assert isinstance(underlying, experiment.model.errors.FlowIRConfigurationErrors)
+
+    assert len(underlying.underlyingErrors) == 1
+    exc = underlying.underlyingErrors[0]
+    assert isinstance(exc, experiment.model.errors.FlowIREnvironmentUnknown)
+
+    assert exc.platform == "default"
+    assert exc.name == "platform"

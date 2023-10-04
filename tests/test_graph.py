@@ -23,6 +23,10 @@ import experiment.model.conf
 import experiment.model.errors
 import experiment.model.frontends.flowir
 import experiment.model.graph
+import experiment.model.frontends.dsl
+
+import yaml
+
 from . import utils
 
 
@@ -170,7 +174,7 @@ def test_graph_generate_new_dsl_component():
             'name': 'wisdom'
         },
         'command': {'executable': 'sh', 'arguments': '-c "hello %(name)s; ls -lth %(param0)s %(param1)s"',
-                    'resolvePath': True, 'expandArguments': 'none', 'interpreter': None, 'environment': '$(env-vars)s'},
+                    'resolvePath': True, 'expandArguments': 'none', 'interpreter': None, 'environment': '%(env-vars)s'},
         'resourceRequest': {'numberProcesses': 1, 'numberThreads': 1, 'ranksPerNode': 1, 'threadsPerCore': 1,
                             'memory': None, 'gpus': None},
         'workflowAttributes': {'restartHookFile': None, 'aggregate': False, 'replicate': None,
@@ -282,7 +286,7 @@ def test_graph_generate_new_dsl_workflow_one_component():
         'entry-instance': 'main',
         'execute': [
             {
-                'target': '<main>',
+                'target': '<entry-instance>',
                 'args': {
                     'from-platform': "in-entrypoint",
                     'manifest.fromManifest': 'fromManifest',
@@ -361,7 +365,7 @@ def test_graph_generate_new_dsl_workflow_two_components():
         'entry-instance': 'main',
         'execute': [
             {
-                'target': '<main>',
+                'target': '<entry-instance>',
                 'args': {
                     'from-platform': "in-entrypoint",
                     'manifest.dataset': "dataset",
@@ -516,7 +520,7 @@ def test_graph_generate_new_dsl_workflow_one_component_and_platform():
         'entry-instance': 'main',
         'execute': [
             {
-                'target': '<main>',
+                'target': '<entry-instance>',
                 'args': {
                     'from-platform': "in-entrypoint",
                     'another-var': "in-entrypoint",
@@ -667,3 +671,40 @@ def test_graph_generate_new_dsl_workflow_double_reference_workflow_parameter():
         'data.other.txt': 'data/other.txt',
         'manifest.dataset': 'dataset'
     }
+
+
+def test_parse_simple_dsl2():
+    flowir = experiment.model.frontends.flowir.yaml_load("""
+        application-dependencies:
+          default:
+          - dataset
+        environments:
+          default:
+            my-env:
+              FOO: bar
+
+        variables:
+          default:
+            global:
+              backend: kubernetes
+
+        components:
+        - name: hello
+          command:
+            executable: sh
+            arguments: -c "hello %(backend)s; ls -lth dataset:ref; cat input/msg.txt:ref"
+            expandArguments: "none"
+            environment: my-env
+          references:
+          - dataset:ref
+          - input/msg.txt:ref
+          - input/msg.txt:copy
+          - data/other.txt:copy
+        """)
+    graph = experiment.model.graph.WorkflowGraph.graphFromFlowIR(flowir, {})
+
+    dsl = graph.to_dsl()
+
+    dsl = experiment.model.frontends.dsl.Namespace(**dsl)
+
+    print(yaml.safe_dump(dsl.dict(exclude_unset=True, exclude_defaults=True, exclude_none=True), indent=2))

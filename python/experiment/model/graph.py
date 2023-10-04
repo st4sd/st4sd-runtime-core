@@ -1189,7 +1189,7 @@ class ComponentSpecification(experiment.model.interface.InternalRepresentationAt
                 command['environment'] = self.environment
             else:
                 parameters.append({'name': 'env-vars', 'default': self.environment})
-                command['environment'] = "$(env-vars)s"
+                command['environment'] = "%(env-vars)s"
 
         signature=OrderedDict( (('name', self.identification.identifier), ('parameters', parameters)) )
         dsl = OrderedDict(( ('signature', signature), ))
@@ -2356,7 +2356,7 @@ class WorkflowGraph(object):
         entrypoint = OrderedDict(( ('entry-instance', 'main'), ))
         entrypoint['execute'] = [
                 {
-                    "target": "<main>",
+                    "target": "<entry-instance>",
                     "args": main_args
                 }
             ]

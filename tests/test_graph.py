@@ -1,17 +1,7 @@
 # Copyright IBM Inc. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-
-# coding=UTF-8
-#
-# IBM Confidential
-# OCO Source Materials
-# 5747-SM3
-# (c) Copyright IBM Corp. 2021
-# The source code for this program is not published or otherwise
-# divested of its trade secrets, irrespective of what has
-# been deposited with the U.S. Copyright Office.
 # Author(s): Vassilis Vassiliadis
-# Contact: Vassilis.Vassiliadis@ibm.com
+
 
 from __future__ import print_function
 
@@ -671,40 +661,3 @@ def test_graph_generate_new_dsl_workflow_double_reference_workflow_parameter():
         'data.other.txt': 'data/other.txt',
         'manifest.dataset': 'dataset'
     }
-
-
-def test_parse_simple_dsl2():
-    flowir = experiment.model.frontends.flowir.yaml_load("""
-        application-dependencies:
-          default:
-          - dataset
-        environments:
-          default:
-            my-env:
-              FOO: bar
-
-        variables:
-          default:
-            global:
-              backend: kubernetes
-
-        components:
-        - name: hello
-          command:
-            executable: sh
-            arguments: -c "hello %(backend)s; ls -lth dataset:ref; cat input/msg.txt:ref"
-            expandArguments: "none"
-            environment: my-env
-          references:
-          - dataset:ref
-          - input/msg.txt:ref
-          - input/msg.txt:copy
-          - data/other.txt:copy
-        """)
-    graph = experiment.model.graph.WorkflowGraph.graphFromFlowIR(flowir, {})
-
-    dsl = graph.to_dsl()
-
-    dsl = experiment.model.frontends.dsl.Namespace(**dsl)
-
-    print(yaml.safe_dump(dsl.dict(exclude_unset=True, exclude_defaults=True, exclude_none=True), indent=2))

@@ -20,6 +20,22 @@ A Workflow blueprint explains how to instantiate other Workflow or Component blu
 arguments can be literals, parameters of the parent workflow, or outputs of other steps. Steps cannot form
 direct, or indirect, cycles.
 
+- Reference a step like so: <stepName>
+- Reference a step that is nested in a workflow like this: <parentWorkflow/stepName> or "<parentWorkflow>"/stepName
+- Reference a parameter: %(like-this)s
+- Reference an output of a step: <stepName/optional/path> or "<stepName>"/optional/path
+  - Outputs of steps can also have reference methods: <stepName/optional/path>:ref
+  - other reference methods are:
+    - :output
+    - :copy
+    - :link
+
+Instantiated Blueprints have outputs:
+  Workflow: the outputs are the steps
+  Component: the outputs are files (and streams) that the components produce
+
+
+
 The definition of Namespace is:
 
 entrypoint: # describes how to run this namespace
@@ -75,25 +91,94 @@ components: # Available Component Classes
 #   # other namespaces define
 #   - a list of namespace identifiers
 """
-
+import copy
 import typing
 
-import pydantic
 import experiment.model.codes
 import pydantic.typing
+import pydantic
+import re
 
+import experiment.model.frontends.flowir
+import experiment.model.errors
 
+ParameterPattern = experiment.model.frontends.flowir.FlowIR.VariablePattern
 ParameterValueType = typing.Optional[typing.Union[str, float, int, typing.Dict[str, typing.Any]]]
 
-TargetReference = pydantic.constr(regex=r"<[\.A-Za-z0-9_-]+>")
-ParameterReference = pydantic.constr(regex=r'%\([a-zA-Z0-9_\.-]+\)s')
+StepNamePattern = r"[.A-Za-z0-9_-]+"
+# VV: A reference may have a prefix of N step names and a suffix of M paths each separated with a "/"
+# N must be greater or equal to 1 and M must be greater or equal to 0
+StepNameOrPathPattern = r"[^/:]+"
+
+PatternReferenceMethod = f":(ref|copy|output|link|extract)"
+
+BlueprintPattern = rf"{StepNamePattern}(/({StepNameOrPathPattern}))*"
+OutputReferenceVanilla = rf"(?P<location>(<{BlueprintPattern}/?>))(?P<method>{PatternReferenceMethod})?"
+OutputReferenceNested = rf'(?P<location>"<{BlueprintPattern}>")(/(?P<location_nested>{BlueprintPattern}))?'\
+                             rf'(?P<method>{PatternReferenceMethod})?'
+
+TargetReference = pydantic.constr(regex=fr"<{StepNamePattern}>")
+ParameterReference = pydantic.constr(regex=ParameterPattern)
 MaxRestarts = pydantic.conint(gt=-2)
-BackendType = pydantic.constr(regex=r'(%\([a-zA-Z0-9_\.-]+\)s|docker|local|lsf|kubernetes)')
-K8sQosType = pydantic.constr(regex=r'(%\([a-zA-Z0-9_\.-]+\)s|guaranteed|burstable|besteffort)')
-DockerImagePullPolicy = pydantic.constr(regex=r'(%\([a-zA-Z0-9_\.-]+\)s|Always|Never|IfNotPresent)')
+BackendType = pydantic.constr(regex=fr'({ParameterPattern}|docker|local|lsf|kubernetes)')
+K8sQosType = pydantic.constr(regex=fr'({ParameterPattern}|guaranteed|burstable|besteffort)')
+DockerImagePullPolicy = pydantic.constr(regex=fr'({ParameterPattern}|Always|Never|IfNotPresent)')
 ResourceRequestFloat = pydantic.confloat(ge=0)
 ResourceRequestInt = pydantic.conint(ge=0)
-EnvironmentReference = pydantic.constr(regex=r'(%\([a-zA-Z0-9_\.-]+\)s|none|environment)')
+EnvironmentReference = pydantic.constr(regex=fr'({ParameterPattern}|none|environment)')
+
+
+class OutputReference:
+    _pattern_vanilla = re.compile(OutputReferenceVanilla)
+    _pattern_nested = re.compile(OutputReferenceNested)
+
+    def __init__(
+        self,
+        location: typing.List[str],
+        method: typing.Optional[str] = None,
+    ):
+        self.location = list(location)
+        self.method = method
+
+    @classmethod
+    def from_str(cls, ref_str: str) -> "OutputReference":
+        match = cls._pattern_nested.fullmatch(ref_str)
+        if match:
+            groups = match.groupdict()
+            # VV: get rid of `"<` and `>"` then a possibly trailing `/`, whatever is left is the location of the output
+            location = groups['location'][2:-2].rstrip("/").split("/")
+            # VV: similar for the optional "nested" location
+            if  groups.get("location_nested") is not None:
+                location_nested = groups['location_nested'].rstrip("/").split("/")
+                location.extend(location_nested)
+
+            if groups.get("method") is not None:
+                method = groups["method"][1:]
+            else:
+                method = None
+
+            return cls(location=location, method=method)
+
+        match = cls._pattern_vanilla.fullmatch(ref_str)
+        if match:
+            groups = match.groupdict()
+            # VV: get rid of `<` and `>` then a possibly trailing `/`, whatever is left is the location of the output
+            location = groups['location'][1:-1].rstrip("/").split("/")
+
+            if groups.get("method") is not None:
+                method = groups["method"][1:]
+            else:
+                method = None
+            return cls(location=location, method=method)
+
+        raise ValueError(f"{ref_str} is not a valid reference to the output of a Blueprint")
+
+    def to_str(self):
+        from_location = f"<{'/'.join(self.location)}>"
+        if self.method:
+            return ":".join((from_location, self.method))
+
+        return from_location
 
 
 class Parameter(pydantic.BaseModel):
@@ -129,7 +214,9 @@ class Signature(pydantic.BaseModel):
         extra = "forbid"
 
     name: str = pydantic.Field(
-        description="The name of the blueprint, must be unique in the parent namespace"
+        description="The name of the blueprint, must be unique in the parent namespace",
+        min_length=1,
+        regex=r"[A-Za-z0-9\._-]+"
     )
     parameters: typing.List[Parameter] = pydantic.Field(
         description="The collection of the parameters to the blueprint"
@@ -161,6 +248,9 @@ class ExecuteStep(pydantic.BaseModel):
                           "Each entry is a key: value pair where the key is the name of a step parameter "
                           "and the value the desired value of the step parameter",
     )
+
+    def get_target(self) -> str:
+        return self.target[1:-1]
 
 
 class Workflow(pydantic.BaseModel):
@@ -601,13 +691,13 @@ class Component(pydantic.BaseModel):
     )
 
     resourceRequest: CResourceRequest = pydantic.Field(
-        default_factory=CResourceRequest(),
+        default_factory=CResourceRequest,
         description="Resource request options to propagate to the resourceManager of the backend that will execute "
                     "the Tasks of this component"
     )
 
     resourceManager: CResourceManager = pydantic.Field(
-        default_factory=CResourceManager(),
+        default_factory=CResourceManager,
         description="Settings for the backend to use for executing Tasks of this Component"
     )
 
@@ -633,7 +723,7 @@ class Entrypoint(pydantic.BaseModel):
     def val_single_execute_step(cls, model: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
         target_name = model['execute'][0].target
         if target_name != "<entry-instance>":
-            raise ValueError("The instance of the entrypoint blueprint is called \"<entry-instance>\" "
+            raise ValueError("The instance of the entrypoint blueprint must be called \"<entry-instance>\" "
                              f"not \"{target_name}\"")
         return model
 
@@ -653,3 +743,371 @@ class Namespace(pydantic.BaseModel):
     components: typing.Optional[typing.List[Component]] = pydantic.Field(
         None, description="The Component blueprints of this namespace"
     )
+
+    def get_blueprint(self, name: str) -> typing.Union[Workflow, Component]:
+        for t in (self.components or []) + (self.workflows or []):
+            if t.signature.name == name:
+                return t
+        raise KeyError(f"No blueprint with name {name}")
+
+
+class ScopeBook:
+    class ScopeEntry:
+        def __init__(
+            self,
+            location: typing.List[str],
+            parameters: typing.Dict[str, ParameterValueType],
+            blueprint: typing.Union[Workflow, Component]
+        ):
+            self.location = location
+            self.parameters = parameters
+            self.blueprint = blueprint.copy(deep=True)
+
+        @property
+        def name(self) -> str:
+            return self.location[-1]
+
+        def resolve_parameter_references_of_instance(
+            self: "ScopeBook.ScopeEntry",
+            scope_instances: typing.Dict[typing.Tuple[str], "ScopeBook.ScopeEntry"]
+        ) -> typing.List[Exception]:
+            errors: typing.List[Exception] = []
+            for name, value in self.parameters.items():
+                try:
+                    self.parameters[name] = self.resolve_value(
+                        value=value,
+                        field=["signature", "parameters", name],
+                        scope_instances=scope_instances,
+                    )
+                except ValueError as e:
+                    errors.append(e)
+
+            return errors
+
+        def resolve_value(
+                self,
+                value: ParameterValueType,
+                field: typing.List[str],
+                scope_instances: typing.Dict[typing.Tuple[str], typing.Any],
+        ) -> ParameterValueType:
+            """Resolves a value given the location of the owner blueprint instance and a book of all scopes
+
+            Args:
+                value:
+                    The parameter value
+                scope_instances:
+                    A collection of all known scopes
+
+            Returns:
+                The resolved parameter value
+            """
+            rg_parameter = re.compile(ParameterPattern)
+
+            def kernel(what: str, loc: typing.List[str], scope: ScopeBook.ScopeEntry) -> ParameterValueType:
+                start = 0
+                while True:
+                    for match in rg_parameter.finditer(what, pos=start):
+                        if match:
+                            break
+                    else:
+                        return what
+
+                    # VV: Get rid of %( and )s
+                    name = match.group()[2:-2]
+
+                    try:
+                        fillin = scope.parameters[name]
+                    except KeyError:
+                        raise ValueError(f"Node {loc} references (field={field}) unknown parameter {name}. "
+                                         f"Known parameters are {scope.parameters}")
+
+                    if isinstance(fillin, dict):
+                        if not (start == 0 and match.start() == 0 and match.end() == len(what)):
+                            raise ValueError(f"Node {loc} references (field={field}) a dictionary parameter "
+                                             f"{name} but the value contains more characters. The value is \"{what}\"")
+                        else:
+                            return fillin
+
+                    if not isinstance(fillin, str):
+                        if not (start == 0 and match.start() == 0 and match.end() == len(what)):
+                            fillin = str(fillin)
+                        else:
+                            return fillin
+
+                    what = what[:match.start()] + fillin + what[match.end():]
+                    start = match.end()
+
+            def should_resolve_more(what: ParameterValueType) -> bool:
+                if isinstance(what, (int, bool, dict)) or what is None:
+                    return False
+
+                if isinstance(what, str):
+                    return rg_parameter.search(what) is not None
+                return False
+
+            current_location = list(self.location)
+            while should_resolve_more(value):
+                current_location.pop(-1)
+                current_scope = scope_instances[tuple(current_location)]
+
+                value = kernel(what=value, loc=current_location, scope=current_scope)
+
+            return value
+
+    def __init__(self):
+        self.scopes: typing.List[ScopeBook.ScopeEntry] = []
+
+        # VV: Keys are "locations" of blueprint instances i.e. ["entry-instance", "parentWorkflow", "component"]
+        # think of this as the full path an instance of a blueprint starting from the root of the namespace.
+        # The root of the namespace is what the entrypoint invokes, it's name is always `entry-instance`.
+        # The values are the ScopeEntries which are effectively instances of a Blueprint i.e.
+        # The instance name, definition, and parameters of a Blueprint
+        self.instances: typing.Dict[typing.Tuple[str], ScopeBook.ScopeEntry] = {}
+
+    def enter(self, name: str, parameters: typing.Dict[str, ParameterValueType], blueprint: Workflow):
+        parameters = copy.deepcopy(parameters)
+        errors = []
+        location = self.get_location() + [name]
+
+        uid = tuple(location)
+
+        if uid in self.instances:
+            errors.append(ValueError(f"Node has already been visited", location))
+
+        for p in blueprint.signature.parameters:
+            if p.name in parameters:
+                continue
+            if "default" not in p.__fields_set__:
+                errors.append(ValueError(f"The step {p.name} in location {'/'.join(location)} "
+                                         f"does not have a value or default"))
+        if errors:
+            raise ValueError("\n".join([str(e) for e in errors]))
+        scope_entry = ScopeBook.ScopeEntry(location=location, parameters=parameters, blueprint=blueprint)
+        self.instances[uid] = scope_entry
+
+        self.scopes.append(scope_entry)
+
+    def exit(self):
+        self.scopes.pop(-1)
+
+    def current_scope(self) -> "ScopeBook.ScopeEntry":
+        return self.scopes[-1]
+
+    def depth(self) -> int:
+        return len(self.scopes)
+
+
+    def get_location(self) -> typing.List[str]:
+        return [s.name for s in self.scopes]
+
+
+    def get_parent_parameter_names(self) -> typing.List[str]:
+        if self.depth() > 1:
+            uid = tuple(self.get_location()[:-1])
+            scope = self.instances[uid]
+            return sorted(scope.parameters)
+
+        return []
+
+    def _seed_scope_instances(self, namespace: Namespace) -> typing.List[Exception]:
+        """Utility method to visit all Workflows and Components which are reachable from the Entrypoint and seed
+        the ScopeBook with 1 scope for each visited blueprint
+
+        The utility method updates the `scope_instances` ivar.
+
+        Args:
+            namespace:
+                The namespace to walk
+
+        Returns:
+            An array of errors
+        """
+        remaining_scopes = [
+            ScopeBook.ScopeEntry(
+                location=["entry-instance"],
+                blueprint=namespace.get_blueprint(namespace.entrypoint.entryInstance),
+                parameters=namespace.entrypoint.execute[0].args,
+            )
+        ]
+
+        errors: typing.List[Exception] = []
+
+        rg_param = re.compile(ParameterPattern)
+
+        while remaining_scopes:
+            scope = remaining_scopes.pop(0)
+            self.enter(name=scope.name, parameters=scope.parameters, blueprint=scope.blueprint)
+            location = self.get_location()
+
+            # VV: Argument values may ONLY reference parameters of the parent scope
+            parent_parameters = self.get_parent_parameter_names()
+
+            for name, value in scope.parameters.items():
+                if isinstance(value, str):
+                    refs = rg_param.findall(value)
+                    for match in refs:
+                        # VV: throw away "%(" and ")s"
+                        param = match[2:-2]
+
+                        if param not in parent_parameters:
+                            errors.append(KeyError(
+                                f"Node {location} references the parameter {param} but its parent"
+                                f"does not have such a parameter"))
+
+            if isinstance(scope.blueprint, Workflow):
+                children_scopes = []
+                for execute in scope.blueprint.execute:
+                    child_location = location + [execute.get_target()]
+
+                    try:
+                        blueprint_name = scope.blueprint.steps[execute.get_target()]
+                    except KeyError:
+                        errors.append(KeyError(f"Node {child_location} has no matching step"))
+                        continue
+
+                    try:
+                        blueprint = namespace.get_blueprint(blueprint_name)
+                    except KeyError as e:
+                        errors.append(e)
+                        continue
+
+                    new_scope = ScopeBook.ScopeEntry(
+                        location=scope.location + [execute.get_target()],
+                        parameters=execute.args,
+                        blueprint=blueprint,
+                    )
+
+                    if isinstance(blueprint, Workflow):
+                        children_scopes.append(new_scope)
+                    else:
+                        children_scopes.insert(0, new_scope)
+
+                remaining_scopes = children_scopes + remaining_scopes
+            elif isinstance(scope.blueprint, Component):
+                pass
+            else:
+                location = '\n'.join(location)
+                raise NotImplementedError(f"Cannot visit location {location} for Node", scope)
+
+        return errors
+
+    @classmethod
+    def from_namespace(cls, namespace: Namespace) -> "ScopeBook":
+        scope_book = cls()
+
+        errors = scope_book._seed_scope_instances(namespace=namespace)
+
+        if errors:
+            raise experiment.model.errors.FlowIRConfigurationErrors(errors=errors)
+
+        # VV: TODO now find references to the env-vars by visiting the fields of the component
+        # if any field other than `command.environment` references a dictionary record an error
+        for location, scope in scope_book.instances.items():
+            if isinstance(scope.blueprint, Workflow):
+                errors.extend(scope.resolve_parameter_references_of_instance(scope_instances=scope_book.instances))
+
+        for location, scope in scope_book.instances.items():
+            if isinstance(scope.blueprint, Component):
+                errors.extend(scope.resolve_parameter_references_of_instance(scope_instances=scope_book.instances))
+
+        if errors:
+            raise experiment.model.errors.FlowIRConfigurationErrors(errors=errors)
+
+        return scope_book
+
+
+class ComponentFlowIR:
+    def __init__(
+        self,
+        flowir: experiment.model.frontends.flowir.DictFlowIRComponent,
+        environment: typing.Optional[typing.Dict[str, typing.Any]],
+        errors: typing.List[Exception],
+    ):
+        self.flowir = flowir
+        self.environment = environment
+        self.errors = errors
+
+
+def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flowir.FlowIRConcrete:
+    """Converts a Namespace to flowir
+
+    Algorithm:
+
+    1. visit all reachable nodes starting from the entrypoint (not necessarily in scheduling order)
+    2. verify that all reachable nodes reference a blueprint that actually exists
+    3. build a mapping of unique node identifiers to the blueprint that they reference
+    4. after visiting all nodes if there're any errors raise an exception and stop, else:
+    5. revisit all `Component` nodes (order doesn't matter) and WIP
+
+    Args:
+        namespace: the namespace to convert
+
+    Returns:
+        A FlowIRConcrete instance
+    """
+    scopes =  ScopeBook.from_namespace(namespace)
+
+    complete = experiment.model.frontends.flowir.FlowIRConcrete(
+        flowir_0={},
+        platform=experiment.model.frontends.flowir.FlowIR.LabelDefault,
+        documents={},
+    )
+
+    components: typing.Dict[typing.Tuple[str], ComponentFlowIR] = {}
+    errors = []
+
+    for location, scope in scopes.instances.items():
+        if isinstance(scope.blueprint, Component):
+            comp_flowir = digest_dsl_component(
+                scope=scope,
+                scope_instances=scopes.instances
+            )
+            errors.extend(comp_flowir.errors)
+
+    if errors:
+        raise experiment.model.errors.FlowIRConfigurationErrors(errors=errors)
+
+    return complete
+
+def digest_dsl_component(
+    scope: ScopeBook.ScopeEntry,
+    scope_instances: typing.Dict[typing.Tuple[str], ScopeBook.ScopeEntry],
+) -> ComponentFlowIR:
+    """Utility method to generate information that the caller can use to put together a FlowIRConcrete instance
+
+    At this point, parameters are either int, str, dictionaries.
+    Strings may point to other Blueprint instances, when they to, they look like:
+     - <optional/this>[:${method}] (i.e. an optional method)
+     - "<optional/this>"[/optional/path][:${method}]
+    If such kind of strings appear in arguments, they **must** be followed by a :${method} e.g. :ref, :copy, etc
+    Parameters can point to both Workflow and Component instances. Parameters which reference Blueprint instances
+    **must not** appear in fields other than command.arguments
+     If a Parameter references a Workflow instance,
+       the parameter **must** also be referenced "%(like-this)s/location/to/component/optional/path":${method}
+          in the field command.arguments
+       the parameter's value **must not** be <optional/workflow>:${method} (i.e. no ${method}
+     If a Parameter references a Component instance,
+       if it has a :${method},
+          if method=copy, the parameter may not appear in the arguments
+
+    Args:
+        scope:
+            the component blueprint, its parameters to instantiate it, and its unique location (uid)
+        scope_instances:
+            all other instantiated blueprints. This is a key: value dictionary, where each key is the location of a
+            scope and the value is the scope of the instantiated blueprint. The scopes may point to either Workflows
+            or Components.
+
+    Returns:
+        Information necessary to produce FlowIR from a Component in the form of ComponentFlowIR and a collection of
+        errors. If there's more than 1 error, the information in the ComponentFlowIR may be incomplete
+    """
+
+    ret = ComponentFlowIR(
+        flowir={},
+        errors=[],
+        environment=None
+    )
+
+
+    return ret

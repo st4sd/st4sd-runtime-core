@@ -43,7 +43,44 @@ def simple_flowir() -> experiment.model.frontends.flowir.DictFlowIR:
             """)
 
 
-def test_parse_simple_dsl2(simple_flowir: experiment.model.frontends.flowir.DictFlowIR):
+@pytest.fixture()
+def dsl_single_workflow_single_component_one_step() -> typing.Dict[str, typing.Any]:
+    return yaml.safe_load("""
+    entrypoint:
+      entry-instance: main
+      execute:
+      - args:
+          foo: world
+    workflows:
+    - signature:
+        name: main
+        parameters:
+        - name: foo
+      steps:
+        greetings: echo
+      execute:
+      - target: <greetings>
+        args:
+          message: "hello"
+          other: "%(foo)s"
+    components:
+    - signature:
+        name: echo
+        parameters:
+        - name: message
+        - name: other
+          default: a default value
+        - name: environment
+          default:
+            DEFAULTS: PATH:LD_LIBRARY_PATH
+            AN_ENV_VAR: ITS_VALUE
+      command:
+        environment: "%(environment)s"
+        executable: echo
+        arguments: "%(message)s %(other)s"        
+    """)
+
+def test_parse_hallucinated_simple_dsl2(simple_flowir: experiment.model.frontends.flowir.DictFlowIR):
     graph = experiment.model.graph.WorkflowGraph.graphFromFlowIR(simple_flowir, {})
 
     dsl = graph.to_dsl()
@@ -69,7 +106,7 @@ def test_parse_simple_dsl2(simple_flowir: experiment.model.frontends.flowir.Dict
     ('"<workflow/component>"/file', ["workflow", "component", "file"], None, "<workflow/component/file>"),
 ])
 def test_parse_step_references(input_outputs: typing.Tuple[
-    str, typing.List[str], typing.Optional[str]
+    str, typing.List[str], typing.Optional[str], str,
 ]):
     ref_str, expected_location, expected_method, expected_rewrite = input_outputs
 
@@ -79,3 +116,58 @@ def test_parse_step_references(input_outputs: typing.Tuple[
     assert ref.method == expected_method
     assert ref.to_str() == expected_rewrite
 
+
+
+def test_dsl2_single_workflow_single_component_single_step_no_datareferences(
+    dsl_single_workflow_single_component_one_step: typing.Dict[str, typing.Any]
+):
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl_single_workflow_single_component_one_step)
+
+    print(
+        yaml.safe_dump(
+            namespace.dict(
+                exclude_unset=True,
+                exclude_none=True,
+                exclude_defaults=True,
+                by_alias=True
+            ),
+            sort_keys=False
+        )
+    )
+
+    flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
+
+    print(yaml.safe_dump(flowir.raw(), sort_keys=False))
+
+    flowir = flowir.raw()
+    assert len(flowir["components"]) == 1
+    assert flowir["components"][0] == {
+        "stage": 0,
+        "name": "echo",
+        "command": {
+            "executable": "echo",
+            "arguments": "hello world",
+            "environment": "env0"
+        }
+    }
+
+    assert len(flowir["environments"]["default"]) == 1
+    assert flowir["environments"]["default"]["env0"] == {
+        "DEFAULTS": "PATH:LD_LIBRARY_PATH",
+        "AN_ENV_VAR": "ITS_VALUE"
+    }
+
+
+def test_replace_many_parameter_references():
+    x = experiment.model.frontends.dsl._replace_many_parameter_references(
+        what="%(message)s %(other)s",
+        loc=[],
+        parameters= {
+            "message": "hello",
+            "other": "world",
+            "environment": {"hi": "there"}
+        },
+        field=[],
+    )
+
+    assert x == "hello world"

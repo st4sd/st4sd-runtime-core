@@ -110,12 +110,14 @@ StepNamePattern = r"[.A-Za-z0-9_-]+"
 # N must be greater or equal to 1 and M must be greater or equal to 0
 StepNameOrPathPattern = r"[^/:]+"
 
-PatternReferenceMethod = f":(ref|copy|output|link|extract)"
+PatternReferenceMethod = f"(:(?P<method>(ref|copy|output|link|extract)))"
 
 BlueprintPattern = rf"{StepNamePattern}(/({StepNameOrPathPattern}))*"
-OutputReferenceVanilla = rf"(?P<location>(<{BlueprintPattern}/?>))(?P<method>{PatternReferenceMethod})?"
+OutputReferenceVanilla = rf"(?P<location>(<{BlueprintPattern}/?>)){PatternReferenceMethod}?"
 OutputReferenceNested = rf'(?P<location>"<{BlueprintPattern}>")(/(?P<location_nested>{BlueprintPattern}))?'\
-                             rf'(?P<method>{PatternReferenceMethod})?'
+                             rf'{PatternReferenceMethod}?'
+RevampedReferencePattern = fr'"(?P<reference>([.a-zA-Z0-9_/-])+)"{PatternReferenceMethod}'
+LegacyReferencePattern = fr'(?P<reference>([.a-zA-Z0-9_/-])+){PatternReferenceMethod}'
 
 TargetReference = pydantic.constr(regex=fr"<{StepNamePattern}>")
 ParameterReference = pydantic.constr(regex=ParameterPattern)
@@ -153,20 +155,21 @@ class OutputReference:
                 location.extend(location_nested)
 
             if groups.get("method") is not None:
-                method = groups["method"][1:]
+                method = groups["method"]
             else:
                 method = None
 
             return cls(location=location, method=method)
 
         match = cls._pattern_vanilla.fullmatch(ref_str)
+
         if match:
             groups = match.groupdict()
             # VV: get rid of `<` and `>` then a possibly trailing `/`, whatever is left is the location of the output
             location = groups['location'][1:-1].rstrip("/").split("/")
 
             if groups.get("method") is not None:
-                method = groups["method"][1:]
+                method = groups["method"]
             else:
                 method = None
             return cls(location=location, method=method)
@@ -251,6 +254,13 @@ class ExecuteStep(pydantic.BaseModel):
 
     def get_target(self) -> str:
         return self.target[1:-1]
+
+
+class ExecuteStepEntryInstance(ExecuteStep):
+    target: pydantic.typing.Literal["<entry-instance>"] = pydantic.Field(
+        "<entry-instance>", description="The entry point step name. Must be <entry-instance>."
+    )
+
 
 
 class Workflow(pydantic.BaseModel):
@@ -648,7 +658,96 @@ class CCommand(pydantic.BaseModel):
                     "shell command echo. When set to \"none\" the runtime does not expand the arguments at all."
     )
 
+def _replace_many_parameter_references(
+        what: str,
+        loc: typing.List[str],
+        parameters: typing.Dict[str, ParameterValueType],
+        field: typing.List[str],
+        rg_parameter: typing.Optional[re.Pattern] = None,
+) -> ParameterValueType:
+    start = 0
 
+    if rg_parameter is None:
+        rg_parameter = re.compile(ParameterPattern)
+
+    while True:
+        for match in rg_parameter.finditer(what, pos=start):
+            if match:
+                break
+        else:
+            return what
+
+        # VV: Get rid of %( and )s
+        name = match.group()[2:-2]
+
+        try:
+            fillin = parameters[name]
+        except KeyError:
+            raise ValueError(f"Node {loc} references (field={field}) unknown parameter {name}. "
+                             f"Known parameters are {parameters}")
+
+        if isinstance(fillin, dict):
+            if not (start == 0 and match.start() == 0 and match.end() == len(what)):
+                raise ValueError(f"Node {loc} references (field={field}) a dictionary parameter "
+                                 f"{name} but the value contains more characters. The value is \"{what}\"")
+            else:
+                return fillin
+
+        if not isinstance(fillin, str):
+            if not (start == 0 and match.start() == 0 and match.end() == len(what)):
+                fillin = str(fillin)
+            else:
+                return fillin
+
+        what = what[:match.start()] + fillin + what[match.end():]
+        # VV: It's correct to ignore what we replaced in. If it includes a parameter reference then
+        # it must be pointing to a parameter that exists in the parent scope!
+        start = match.start() + len(fillin)
+
+def replace_parameter_references(
+        value: ParameterValueType,
+        field: typing.List[str],
+        scope_instances: typing.Dict[typing.Tuple[str], "ScopeBook.ScopeEntry"],
+        location: typing.Iterable[str],
+) -> ParameterValueType:
+    """Resolves a value given the location of the owner blueprint instance and a book of all scopes
+
+    Args:
+
+        value:
+            The parameter value
+        scope_instances:
+            A collection of all known scopes
+        field:
+            the path to the field whose value is being handled
+        location:
+            The location of the node that owns the field
+    Returns:
+        The resolved parameter value
+    """
+    rg_parameter = re.compile(ParameterPattern)
+
+    def should_resolve_more(what: ParameterValueType) -> bool:
+        if isinstance(what, (int, bool, dict)) or what is None:
+            return False
+
+        if isinstance(what, str):
+            return rg_parameter.search(what) is not None
+        return False
+
+    current_location = list(location)
+    while should_resolve_more(value):
+        current_scope = scope_instances[tuple(current_location[:-1])]
+        value = _replace_many_parameter_references(
+            what=value,
+            loc=current_location,
+            parameters=current_scope.parameters,
+            field=field,
+            rg_parameter=rg_parameter
+        )
+        current_location.pop(-1)
+
+    return value
 
 
 class CExecutors(pydantic.BaseModel):
@@ -706,7 +805,7 @@ class Entrypoint(pydantic.BaseModel):
     class Config:
         extra = "forbid"
 
-    execute: typing.List[ExecuteStep] = pydantic.Field(
+    execute: typing.List[ExecuteStepEntryInstance] = pydantic.Field(
         [],
         min_items=1,
         max_items=1,
@@ -718,14 +817,6 @@ class Entrypoint(pydantic.BaseModel):
         description="The identifier of the entrypoint blueprint",
         alias="entry-instance"
     )
-
-    @pydantic.root_validator(pre=False, skip_on_failure=True)
-    def val_single_execute_step(cls, model: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
-        target_name = model['execute'][0].target
-        if target_name != "<entry-instance>":
-            raise ValueError("The instance of the entrypoint blueprint must be called \"<entry-instance>\" "
-                             f"not \"{target_name}\"")
-        return model
 
 
 class Namespace(pydantic.BaseModel):
@@ -767,6 +858,37 @@ class ScopeBook:
         def name(self) -> str:
             return self.location[-1]
 
+        def verify_parameters(self) -> typing.List[Exception]:
+            """Utility method to verify the parameters of a scope
+
+             Returns:
+                 An array of errors explaining problems
+            """
+            errors = []
+
+            known_params = [p.name for p in self.blueprint.signature.parameters]
+
+            for name in self.parameters:
+                if name not in known_params:
+                    errors.append(
+                        ValueError(f"Unknown parameter {name} for Blueprint {self.blueprint.signature.name} "
+                                   f"at location {self.location}")
+                    )
+
+            return errors
+
+        def fold_in_defaults_of_parameters(self):
+            """Utility method to update the @parameters ivar with default values to the parameters of the Blueprint
+            """
+            known_params = {
+                p.name: p.default for p in self.blueprint.signature.parameters
+                if "default" in p.__fields_set__
+            }
+
+            for name, value in known_params.items():
+                if name not in self.parameters:
+                    self.parameters[name] = value
+
         def resolve_parameter_references_of_instance(
             self: "ScopeBook.ScopeEntry",
             scope_instances: typing.Dict[typing.Tuple[str], "ScopeBook.ScopeEntry"]
@@ -774,7 +896,8 @@ class ScopeBook:
             errors: typing.List[Exception] = []
             for name, value in self.parameters.items():
                 try:
-                    self.parameters[name] = self.resolve_value(
+                    self.parameters[name] = replace_parameter_references(
+                        location=self.location,
                         value=value,
                         field=["signature", "parameters", name],
                         scope_instances=scope_instances,
@@ -784,73 +907,150 @@ class ScopeBook:
 
             return errors
 
-        def resolve_value(
+        def resolve_output_references_of_instance(
+            self: "ScopeBook.ScopeEntry",
+            scope_instances: typing.Dict[typing.Tuple[str], "ScopeBook.ScopeEntry"],
+            ensure_references_point_to_sibling_steps: bool,
+        ) -> typing.List[Exception]:
+            errors: typing.List[Exception] = []
+            for name, value in self.parameters.items():
+                try:
+                    self.parameters[name] = self.replace_step_references(
+                        value=value,
+                        field=["signature", "parameters", name],
+                        scope_instances=scope_instances,
+                        ensure_references_point_to_sibling_steps=ensure_references_point_to_sibling_steps,
+                    )
+                except ValueError as e:
+                    errors.append(e)
+
+                try:
+                    self.parameters[name] = self.replace_revamped_references(value=value)
+                except ValueError as e:
+                    errors.append(e)
+
+            return errors
+
+        def resolve_legacy_data_references(
+            self: "ScopeBook.ScopeEntry",
+            scope_instances: typing.Dict[typing.Tuple[str], "ScopeBook.ScopeEntry"],
+        ) -> typing.List[Exception]:
+            errors: typing.List[Exception] = []
+            for name, value in self.parameters.items():
+                try:
+                    self.parameters[name] = self.replace_revamped_references(value=value)
+                except ValueError as e:
+                    errors.append(e)
+
+            return errors
+
+        @classmethod
+        def replace_revamped_references(
+                cls,
+                value: ParameterValueType,
+        ) -> ParameterValueType:
+            """Rewrites all Revamped DataReferences into Legacy DataReferences
+
+            For example, it turns "input/hello":ref into input/hello:ref
+
+            Args:
+                value:
+                    The parameter value
+            Returns:
+                The resolved parameter value
+            """
+            if not isinstance(value, str):
+                return value
+
+            pattern_revamped_ref = re.compile(RevampedReferencePattern)
+
+            partial = ""
+            start=0
+            for match in pattern_revamped_ref.finditer(value):
+                partial += value[start:match.start()]
+                start = match.end()
+                ref = match.groupdict()["reference"]
+                method =  match.groupdict()["method"]
+                partial += ":".join((ref, method))
+            partial += value[start:]
+            value = partial
+
+            return value
+
+        def replace_step_references(
                 self,
                 value: ParameterValueType,
                 field: typing.List[str],
-                scope_instances: typing.Dict[typing.Tuple[str], typing.Any],
+                scope_instances: typing.Dict[typing.Tuple[str], "ScopeBook.ScopeEntry"],
+                ensure_references_point_to_sibling_steps: bool = True,
         ) -> ParameterValueType:
-            """Resolves a value given the location of the owner blueprint instance and a book of all scopes
+            """Rewrites all references to steps in a value to their absolute form
 
             Args:
                 value:
                     The parameter value
                 scope_instances:
                     A collection of all known scopes
+                field:
+                    the path to the field whose value is being handled
+                ensure_references_point_to_sibling_steps:
+                    When True, and the location of an OutputReference does not start from a sibling step to the
+                    owner of the field then the method will raise a ValueError()
 
             Returns:
                 The resolved parameter value
+
+            Raises:
+                ValueError:
+                    On an invalid OutputReference
             """
-            rg_parameter = re.compile(ParameterPattern)
 
-            def kernel(what: str, loc: typing.List[str], scope: ScopeBook.ScopeEntry) -> ParameterValueType:
-                start = 0
-                while True:
-                    for match in rg_parameter.finditer(what, pos=start):
-                        if match:
-                            break
-                    else:
-                        return what
+            if not isinstance(value, str):
+                return value
 
-                    # VV: Get rid of %( and )s
-                    name = match.group()[2:-2]
+            sibling_steps = []
+            if len(self.location) > 1:
+                uid_parent = tuple(self.location[:-1])
+                try:
+                    parent_scope = scope_instances[uid_parent]
+                except KeyError:
+                    raise ValueError(f"Unable to identify the parent Workflow of {self.location}")
 
-                    try:
-                        fillin = scope.parameters[name]
-                    except KeyError:
-                        raise ValueError(f"Node {loc} references (field={field}) unknown parameter {name}. "
-                                         f"Known parameters are {scope.parameters}")
+                if not isinstance(parent_scope.blueprint, Workflow):
+                    raise ValueError(f"The parent of {self.location} is not a Workflow but a {type(parent_scope)}")
 
-                    if isinstance(fillin, dict):
-                        if not (start == 0 and match.start() == 0 and match.end() == len(what)):
-                            raise ValueError(f"Node {loc} references (field={field}) a dictionary parameter "
-                                             f"{name} but the value contains more characters. The value is \"{what}\"")
-                        else:
-                            return fillin
+                sibling_steps=[x for x in parent_scope.blueprint.steps if x != self.name]
+            else:
+                # VV: this can only happen in entrypoint.execute
+                uid_parent = []
 
-                    if not isinstance(fillin, str):
-                        if not (start == 0 and match.start() == 0 and match.end() == len(what)):
-                            fillin = str(fillin)
-                        else:
-                            return fillin
+            pattern_vanilla = re.compile(OutputReferenceVanilla)
+            pattern_nested = re.compile(OutputReferenceNested)
 
-                    what = what[:match.start()] + fillin + what[match.end():]
+            if ensure_references_point_to_sibling_steps:
+                # VV: First ensure that references to outputs all begin with a sibling name
+                for pattern in [pattern_vanilla, pattern_nested]:
+                    for match in pattern.finditer(value):
+                        # VV: This works even if the OutputReference contains a reference to a parameter
+                        ref = OutputReference.from_str(match.group(0))
+                        if not ref.location or ref.location[0] not in sibling_steps:
+                            # VV: FIXME THIS MUST BE WRONG
+                            #  What if I get a parameter that's pointing to a non sibling step ???
+                            raise ValueError(f"OutputReference {match.group(0)} in field {field} of Blueprint instance "
+                                             f"{self.location} does not reference any of the known siblings "
+                                             f"{sibling_steps}")
+
+            for pattern in [pattern_vanilla, pattern_nested]:
+                partial = ""
+                start=0
+                for match in pattern.finditer(value):
+                    ref = OutputReference.from_str(match.group(0))
+                    partial += value[start:match.start()]
                     start = match.end()
-
-            def should_resolve_more(what: ParameterValueType) -> bool:
-                if isinstance(what, (int, bool, dict)) or what is None:
-                    return False
-
-                if isinstance(what, str):
-                    return rg_parameter.search(what) is not None
-                return False
-
-            current_location = list(self.location)
-            while should_resolve_more(value):
-                current_location.pop(-1)
-                current_scope = scope_instances[tuple(current_location)]
-
-                value = kernel(what=value, loc=current_location, scope=current_scope)
+                    abs_ref = OutputReference(list(uid_parent) + ref.location, method=ref.method)
+                    partial += abs_ref.to_str()
+                partial += value[start:]
+                value = partial
 
             return value
 
@@ -886,6 +1086,8 @@ class ScopeBook:
         self.instances[uid] = scope_entry
 
         self.scopes.append(scope_entry)
+
+        return scope_entry
 
     def exit(self):
         self.scopes.pop(-1)
@@ -936,8 +1138,11 @@ class ScopeBook:
 
         while remaining_scopes:
             scope = remaining_scopes.pop(0)
-            self.enter(name=scope.name, parameters=scope.parameters, blueprint=scope.blueprint)
+            scope = self.enter(name=scope.name, parameters=scope.parameters, blueprint=scope.blueprint)
             location = self.get_location()
+
+            errors.extend(scope.verify_parameters())
+            scope.fold_in_defaults_of_parameters()
 
             # VV: Argument values may ONLY reference parameters of the parent scope
             parent_parameters = self.get_parent_parameter_names()
@@ -971,9 +1176,11 @@ class ScopeBook:
                         errors.append(e)
                         continue
 
+                    parameters = copy.deepcopy(execute.args or {})
+
                     new_scope = ScopeBook.ScopeEntry(
                         location=scope.location + [execute.get_target()],
-                        parameters=execute.args,
+                        parameters=parameters,
                         blueprint=blueprint,
                     )
 
@@ -1002,13 +1209,43 @@ class ScopeBook:
 
         # VV: TODO now find references to the env-vars by visiting the fields of the component
         # if any field other than `command.environment` references a dictionary record an error
+
+        def resolve_scope(
+            scope: ScopeBook.ScopeEntry,
+            scope_book: ScopeBook = scope_book,
+        ):
+            scope_errors = []
+            # VV: Workflows can use the arguments of their step Workflows to propagate the outputs of their children
+            # steps to their grandchildren. This means that it is valid for a Blueprint that is instantiated by a
+            # deeply nested workflow to eventually (i.e. via a chain of parameters) receive an OutputReference whose
+            # location is a step that is NOT a sibling step.
+            # Therefore, we want to ensure that references point to sibling steps before we resolve any parameters.
+            # After we resolve parameters, we can go ahead and resolve the OutputReferences again without performing
+            # the above sibling-step check.
+            errors.extend(scope.resolve_output_references_of_instance(
+                    scope_instances=scope_book.instances,
+                    ensure_references_point_to_sibling_steps=True,
+                )
+            )
+            scope_errors.extend(scope.resolve_parameter_references_of_instance(scope_instances=scope_book.instances))
+            scope_errors.extend(scope.resolve_legacy_data_references(scope_instances=scope_book.instances))
+            scope_errors.extend(scope.resolve_output_references_of_instance(
+                    scope_instances=scope_book.instances,
+                    ensure_references_point_to_sibling_steps=False,
+                )
+            )
+            return  scope_errors
+
         for location, scope in scope_book.instances.items():
             if isinstance(scope.blueprint, Workflow):
-                errors.extend(scope.resolve_parameter_references_of_instance(scope_instances=scope_book.instances))
+                errors.extend(resolve_scope(scope=scope, scope_book=scope_book))
 
         for location, scope in scope_book.instances.items():
             if isinstance(scope.blueprint, Component):
-                errors.extend(scope.resolve_parameter_references_of_instance(scope_instances=scope_book.instances))
+                errors.extend(resolve_scope(scope=scope, scope_book=scope_book))
+
+        # for location, scope in scope_book.instances.items():
+        #     print(type(scope.blueprint).__name__, scope.location, "parameters", scope.parameters)
 
         if errors:
             raise experiment.model.errors.FlowIRConfigurationErrors(errors=errors)
@@ -1019,14 +1256,134 @@ class ScopeBook:
 class ComponentFlowIR:
     def __init__(
         self,
-        flowir: experiment.model.frontends.flowir.DictFlowIRComponent,
         environment: typing.Optional[typing.Dict[str, typing.Any]],
+        scope: ScopeBook.ScopeEntry,
         errors: typing.List[Exception],
     ):
-        self.flowir = flowir
         self.environment = environment
+        self.scope = scope
         self.errors = errors
 
+        self.flowir = scope.blueprint.dict(
+            by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True
+        )
+
+        del self.flowir['signature']
+
+        if "command" not in self.flowir:
+            # VV: this could be a component with a bunch of errors so we cannot trust its contents
+            self.flowir["command"] = {}
+
+
+    def _get_refs_in_param(self, pattern: str) -> typing.Dict[str, typing.List[str]]:
+        refs = {}
+
+        pattern = re.compile(pattern)
+
+        for param, param_value in self.scope.parameters.items():
+            refs[param] = [
+                x.group(0) for x in pattern.finditer(param_value)
+            ]
+
+        return {param_name: sorted(set(param_refs)) for param_name, param_refs in refs.items()}
+
+    def discover_output_references(self) -> typing.Dict[str, typing.List[str]]:
+        return self._get_refs_in_param(OutputReferenceVanilla)
+
+    def discover_legacy_references(self) -> typing.Dict[str, typing.List[str]]:
+        return self._get_refs_in_param(LegacyReferencePattern)
+
+
+    def convert_outputreferences_to_datareferences(self, uid_to_name: typing.Dict[typing.Tuple[str], str]):
+        """Utility method to convert OutputReference instances into Legacy DataReferences
+
+        This method updates the flowir ivar
+
+        Args:
+            uid_to_name:
+                A key: value dictionary where keys are scope locations and values are the names of the associated
+                component instances in the FlowIR domain
+        """
+        pass
+
+
+    def resolve_parameter_references(self):
+        """Utility method to replace all parameter references in @flowir with their values
+
+        The method updates @errors with any problems it identifies
+        """
+
+        can_have_data_output_references = [["command", "arguments"]]
+
+        # VV: Algorithm:
+        # 1. Walk the FlowIR fields
+        # 2. if a field is a string and it is referencing a parameter substitute the parameter reference with the
+        #    parameter value
+        #    if the parameter doesn't exist, then record an error
+        #    if the parameter is an output or data reference and the field is not meant to use either of those,
+        #       then record an error
+
+        class Explore:
+            def __init__(self, location: typing.List[typing.Union[str, int]], value: typing.Any):
+                self.location = location
+                self.value = value
+
+            def update_value(self, new_value: typing.Any, flowir: typing.Dict[str, typing.Any]):
+                where = flowir
+
+                for loc in self.location[:-1]:
+                    where = where[loc]
+
+                where[self.location[-1]] = new_value
+
+            def replace_parameter_references(self, scope: ScopeBook.ScopeEntry, flowir: typing.Dict[str, typing.Any]):
+                new_value = replace_parameter_references(
+                    self.value,
+                    field=self.location,
+                    location=scope.location + ["inner field"],
+                    scope_instances={
+                        tuple(scope.location): scope
+                    }
+                )
+
+                if new_value != self.value:
+                    self.update_value(new_value=new_value, flowir=flowir)
+
+        pending: typing.List[Explore] = [Explore([], self.flowir)]
+
+        while pending:
+            node = pending.pop(0)
+
+            if isinstance(node.value, dict):
+                for key, value in node.value.items():
+                    location = node.location + [key]
+                    pending.insert(0, Explore(location=location, value=value))
+            elif isinstance(node.value, str):
+                node.replace_parameter_references(scope=self.scope, flowir=self.flowir)
+
+
+def number_to_roman_like_numeral(value: int) -> str:
+    lookup = [
+        [1, "I"],
+        # VV: If you get past IV then there's likely something fishy going on
+        [4, "IV"],
+        [5, "V"],
+        [9, "IX"],
+        [10, "X"],
+        # VV: pretend that there are no more numbers past X, if you need 50 you get XXXXX
+    ]
+
+    digit = len(lookup) - 1
+    rep = ""
+
+    while value:
+        while value >= lookup[digit][0]:
+            value -= lookup[digit][0]
+            rep += lookup[digit][1]
+
+        digit -= 1
+
+    return rep
 
 def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flowir.FlowIRConcrete:
     """Converts a Namespace to flowir
@@ -1047,12 +1404,6 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
     """
     scopes =  ScopeBook.from_namespace(namespace)
 
-    complete = experiment.model.frontends.flowir.FlowIRConcrete(
-        flowir_0={},
-        platform=experiment.model.frontends.flowir.FlowIR.LabelDefault,
-        documents={},
-    )
-
     components: typing.Dict[typing.Tuple[str], ComponentFlowIR] = {}
     errors = []
 
@@ -1063,11 +1414,76 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
                 scope_instances=scopes.instances
             )
             errors.extend(comp_flowir.errors)
+            components[tuple(scope.location)] = comp_flowir
 
     if errors:
         raise experiment.model.errors.FlowIRConfigurationErrors(errors=errors)
 
+    component_names: typing.Dict[str, int] = {}
+    uid_to_name: typing.Dict[typing.Tuple[str], str] = {}
+
+    for _, comp in components.items():
+        assert isinstance(comp.scope.blueprint, Component)
+
+        if comp.scope.blueprint.signature.name not in component_names:
+            component_names[comp.scope.blueprint.signature.name] = 0
+            name = comp.scope.blueprint.signature.name
+        else:
+            component_names[comp.scope.blueprint.signature.name] += 1
+            prior = component_names[comp.scope.blueprint.signature.name]
+            name = "-".join((comp.scope.blueprint.signature.name, number_to_roman_like_numeral(prior)))
+
+        uid_to_name[tuple(comp.scope.location)] = name
+        comp.flowir['name'] = name
+
+    complete = experiment.model.frontends.flowir.FlowIRConcrete(
+        flowir_0={},
+        platform=experiment.model.frontends.flowir.FlowIR.LabelDefault,
+        documents={},
+    )
+
+    for _, comp in components.items():
+        comp.convert_outputreferences_to_datareferences(uid_to_name)
+
+    def hash_environment(environment: typing.Dict[str, typing.Any]) -> typing.Tuple[typing.Tuple[str, str]]:
+        hash: typing.List[typing.Tuple[str, str]] = []
+
+        for key in sorted(environment):
+            value = environment[key]
+            if value is None:
+                continue
+            hash.append((key, str(value)))
+
+        return tuple(hash)
+
+    known_environments: typing[typing.Tuple[typing.Tuple[str, str]], str] = {}
+
+    for _, comp in components.items():
+        comp.resolve_parameter_references()
+
+        environment = comp.environment
+        if not environment:
+            continue
+
+        dict_hash = hash_environment(environment)
+        try:
+            environment_name = known_environments[dict_hash]
+        except KeyError:
+            environment_name = f"env{len(known_environments)}"
+            known_environments[dict_hash] = environment_name
+
+            complete.set_environment(environment_name, environment, platform="default")
+
+        command = comp.flowir["command"]
+        command["environment"] = environment_name
+
+
+    # VV: At this point components are ready, start plopping them in the flowir
+    for _, comp in components.items():
+        complete.add_component(comp.flowir)
+
     return complete
+
 
 def digest_dsl_component(
     scope: ScopeBook.ScopeEntry,
@@ -1075,7 +1491,7 @@ def digest_dsl_component(
 ) -> ComponentFlowIR:
     """Utility method to generate information that the caller can use to put together a FlowIRConcrete instance
 
-    At this point, parameters are either int, str, dictionaries.
+    At this point, parameters are either e.g. float, int, str, dictionaries or None
     Strings may point to other Blueprint instances, when they to, they look like:
      - <optional/this>[:${method}] (i.e. an optional method)
      - "<optional/this>"[/optional/path][:${method}]
@@ -1102,12 +1518,43 @@ def digest_dsl_component(
         Information necessary to produce FlowIR from a Component in the form of ComponentFlowIR and a collection of
         errors. If there's more than 1 error, the information in the ComponentFlowIR may be incomplete
     """
+    if not isinstance(scope.blueprint, Component):
+        return ComponentFlowIR(
+            errors=[ValueError(f"Node {scope.location} was expected to be a Component not a {scope.blueprint}")],
+            environment=None,
+            scope=scope,
+        )
 
+    environment = None
+    errors = []
+
+    pattern_parameter = re.compile(ParameterPattern)
+
+    check_environment = scope.blueprint.command.environment
+    if (
+        isinstance(check_environment, str)
+        and pattern_parameter.fullmatch(check_environment)
+    ):
+        # VV: get rid of $( and )s
+        param_name = check_environment[2:-2]
+        if param_name not in scope.parameters:
+            errors.append(ValueError(f"The Component {scope.location} uses the parameter {param_name} to set its"
+                                     f"environment, but the component does not have such a parameter"))
+
+        check_environment = scope.parameters[param_name]
+
+    if isinstance(check_environment, dict):
+        environment = check_environment
+    elif check_environment is "none":
+        environment = {}
+    else:
+        errors.append(ValueError(f"Environment of Component {scope.location} must either be a Dictionary of "
+                                 f"key: value env-vars, be unset, or the string literal \"none\". However it is "
+                                 f"{check_environment}"))
     ret = ComponentFlowIR(
-        flowir={},
-        errors=[],
-        environment=None
+        errors=errors,
+        environment=environment,
+        scope=scope,
     )
-
 
     return ret

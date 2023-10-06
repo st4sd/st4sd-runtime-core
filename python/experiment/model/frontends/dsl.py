@@ -1124,21 +1124,34 @@ class ScopeBook:
         Returns:
             An array of errors
         """
-        remaining_scopes = [
-            ScopeBook.ScopeEntry(
-                location=["entry-instance"],
-                blueprint=namespace.get_blueprint(namespace.entrypoint.entryInstance),
-                parameters=namespace.entrypoint.execute[0].args,
+        import enum
+        class Action(str, enum.Enum):
+            Enter = "enter"
+            Exit = "exit"
+
+        remaining_scopes: typing.List[typing.Tuple[Action, ScopeBook.ScopeEntry]] = [
+            (
+                Action.Enter,
+                ScopeBook.ScopeEntry(
+                    location=["entry-instance"],
+                    blueprint=namespace.get_blueprint(namespace.entrypoint.entryInstance),
+                    parameters=namespace.entrypoint.execute[0].args,
+                )
             )
         ]
 
         errors: typing.List[Exception] = []
 
         rg_param = re.compile(ParameterPattern)
-
         while remaining_scopes:
-            scope = remaining_scopes.pop(0)
+            action, scope = remaining_scopes.pop(0)
+            if action == Action.Exit:
+                self.exit()
+                continue
+
             scope = self.enter(name=scope.name, parameters=scope.parameters, blueprint=scope.blueprint)
+            remaining_scopes.insert(0, (Action.Exit, scope))
+
             location = self.get_location()
 
             errors.extend(scope.verify_parameters())
@@ -1156,8 +1169,8 @@ class ScopeBook:
 
                         if param not in parent_parameters:
                             errors.append(KeyError(
-                                f"Node {location} references the parameter {param} but its parent"
-                                f"does not have such a parameter"))
+                                f"Node {location} references the parameter {param} but its parent "
+                                f"does not have such a parameter, it has {parent_parameters}"))
 
             if isinstance(scope.blueprint, Workflow):
                 children_scopes = []
@@ -1185,9 +1198,9 @@ class ScopeBook:
                     )
 
                     if isinstance(blueprint, Workflow):
-                        children_scopes.append(new_scope)
+                        children_scopes.append((Action.Enter, new_scope))
                     else:
-                        children_scopes.insert(0, new_scope)
+                        children_scopes.insert(0, (Action.Enter, new_scope))
 
                 remaining_scopes = children_scopes + remaining_scopes
             elif isinstance(scope.blueprint, Component):

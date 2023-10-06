@@ -157,6 +157,10 @@ def test_dsl2_single_workflow_single_component_single_step_no_datareferences(
         "AN_ENV_VAR": "ITS_VALUE"
     }
 
+    errors = experiment.model.frontends.flowir.FlowIR.validate(flowir=flowir, documents={})
+
+    assert len(errors) == 0
+
 
 def test_replace_many_parameter_references():
     x = experiment.model.frontends.dsl._replace_many_parameter_references(

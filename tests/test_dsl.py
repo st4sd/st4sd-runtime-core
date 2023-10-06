@@ -44,7 +44,7 @@ def simple_flowir() -> experiment.model.frontends.flowir.DictFlowIR:
 
 
 @pytest.fixture()
-def dsl_single_workflow_single_component_one_step() -> typing.Dict[str, typing.Any]:
+def dsl_one_workflow_one_component_one_step_no_datareferences() -> typing.Dict[str, typing.Any]:
     return yaml.safe_load("""
     entrypoint:
       entry-instance: main
@@ -82,7 +82,7 @@ def dsl_single_workflow_single_component_one_step() -> typing.Dict[str, typing.A
 
 
 @pytest.fixture()
-def dsl_single_workflow_one_component_two_steps_no_edges() -> typing.Dict[str, typing.Any]:
+def dsl_one_workflow_one_component_two_steps_no_edges() -> typing.Dict[str, typing.Any]:
     return yaml.safe_load("""
     entrypoint:
       entry-instance: main
@@ -123,6 +123,54 @@ def dsl_single_workflow_one_component_two_steps_no_edges() -> typing.Dict[str, t
         environment: "%(environment)s"
         executable: echo
         arguments: "%(message)s %(other)s"        
+    """)
+
+
+@pytest.fixture()
+def dsl_two_workflows_one_component_one_step() -> typing.Dict[str, typing.Any]:
+    return yaml.safe_load("""
+    entrypoint:
+      entry-instance: main
+      execute:
+      - args:
+          foo: world
+    workflows:
+    - signature:
+        name: main
+        parameters:
+        - name: foo
+      steps:
+        wrapper: actual
+      execute:
+      - target: <wrapper>
+        args:
+          foo: "%(foo)s"
+    - signature:
+        name: actual
+        parameters:
+        - name: foo
+      steps:
+        greetings: echo
+      execute:
+      - target: <greetings>
+        args:
+          message: "hello"
+          other: "%(foo)s"
+    components:
+    - signature:
+        name: echo
+        parameters:
+        - name: message
+        - name: other
+          default: a default value
+        - name: environment
+          default:
+            DEFAULTS: PATH:LD_LIBRARY_PATH
+            AN_ENV_VAR: ITS_VALUE
+      command:
+        environment: "%(environment)s"
+        executable: echo
+        arguments: "%(message)s %(other)s"
     """)
 
 
@@ -178,10 +226,13 @@ def test_replace_many_parameter_references():
     assert x == "hello world"
 
 
-def test_dsl2_single_workflow_single_component_single_step_no_datareferences(
-    dsl_single_workflow_single_component_one_step: typing.Dict[str, typing.Any]
-):
-    namespace = experiment.model.frontends.dsl.Namespace(**dsl_single_workflow_single_component_one_step)
+@pytest.mark.parametrize("fixture_name", [
+    "dsl_one_workflow_one_component_one_step_no_datareferences",
+    "dsl_two_workflows_one_component_one_step",
+])
+def test_dsl2_single_workflow_single_component_single_step_no_datareferences(fixture_name: str, request):
+    dsl = request.getfixturevalue(argname=fixture_name)
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl)
 
     print(
         yaml.safe_dump(
@@ -223,9 +274,9 @@ def test_dsl2_single_workflow_single_component_single_step_no_datareferences(
 
 
 def test_dsl2_single_workflow_one_component_two_steps_no_edges(
-    dsl_single_workflow_one_component_two_steps_no_edges: typing.Dict[str, typing.Any]
+    dsl_one_workflow_one_component_two_steps_no_edges: typing.Dict[str, typing.Any]
 ):
-    namespace = experiment.model.frontends.dsl.Namespace(**dsl_single_workflow_one_component_two_steps_no_edges)
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl_one_workflow_one_component_two_steps_no_edges)
 
     print(
         yaml.safe_dump(

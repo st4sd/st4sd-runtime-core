@@ -925,7 +925,7 @@ class ScopeBook:
                     errors.append(e)
 
                 try:
-                    self.parameters[name] = self.replace_revamped_references(value=value)
+                    self.parameters[name] = self.replace_revamped_references(value=self.parameters[name])
                 except ValueError as e:
                     errors.append(e)
 
@@ -1311,7 +1311,10 @@ class ComponentFlowIR:
         return self._get_refs_in_param(LegacyReferencePattern)
 
 
-    def convert_outputreferences_to_datareferences(self, uid_to_name: typing.Dict[typing.Tuple[str], str]):
+    def convert_outputreferences_to_datareferences(
+        self,
+        uid_to_name: typing.Dict[typing.Tuple[str], typing.Tuple[int, str]]
+    ):
         """Utility method to convert OutputReference instances into Legacy DataReferences
 
         This method updates the flowir ivar
@@ -1321,8 +1324,122 @@ class ComponentFlowIR:
                 A key: value dictionary where keys are scope locations and values are the names of the associated
                 component instances in the FlowIR domain
         """
-        pass
+        if "references" not in self.flowir:
+            self.flowir["references"] = []
 
+        # VV: OutputReferences and Legacy DataReferences that are in parameter values
+        parameters_legacy: typing.Set[str] = set()
+        parameters_output: typing.Set[str] = set()
+
+        # VV: OutputReferences and Legacy DataReferences that are in the command.arguments field
+        arguments_legacy: typing.Set[str] = set()
+        arguments_output: typing.Set[str] = set()
+
+        # VV: We can find legacy DataReferences and OutputReferences in 2 places:
+        # 1. parameter values
+        # 2. command.arguments
+        # if they appear in a different field, we hope that something else will identify these errors (FlowIRConcrete?)
+
+        pattern_output = re.compile(OutputReferenceVanilla)
+        pattern_legacy = re.compile(LegacyReferencePattern)
+
+        args = self.flowir["command"].get("arguments", "")
+        self.flowir["command"]["arguments"] = args
+
+        # VV: TODO Here we'll need to do something about :copy - I'll figure this out in a future update
+        for match in pattern_output.finditer(args):
+            ref = OutputReference.from_str(match.group(0))
+            if not ref.method:
+                raise ValueError(f"The arguments of the Component {self.scope.location} contain a reference to "
+                                 f"the output {match.group(0)} but the OutputReference is partial, it does not "
+                                 f"end with a :$method suffix.")
+
+        for name, value in self.scope.parameters.items():
+            if not isinstance(value, str):
+                continue
+            for match in pattern_output.finditer(value):
+                ref = OutputReference.from_str(match.group(0))
+                if ref.method:
+                    parameters_output.add(match.group(0))
+                else:
+                    # VV: This parameter is "partial" in that it doesn't include a :$method
+                    # it **must** appear somewhere in the arguments
+                    search = match.group(0) + ":"
+                    for x in arguments_output:
+                        if x.startswith(search) and arguments_output[len(search):] in [
+                            "copy", "link", "ref", "output", "extract"
+                        ]:
+                            break
+                    else:
+                        raise ValueError(f"The parameter {name}={value} of the Component {self.scope.location} "
+                                         f"is an OutputReference without a :$method and the :$method suffix "
+                                         f"cannot be inferred from the field command.arguments={args}")
+
+        for match in pattern_legacy.finditer(args):
+            arguments_legacy.add(match.group(0))
+
+        for name, value in self.scope.parameters.items():
+            if not isinstance(value, str):
+                continue
+            for match in pattern_legacy.finditer(value):
+                parameters_legacy.add(match.group(0))
+
+        # VV: We need to replace OutputReferences with Legacy DataReferences
+        # 1. validate that OutputReferences point to outputs of Components
+        # 2. partition the location of an OutputReference into "location of producer" and "file ref location"
+        # 3. generate a Legacy DataReference which looks like this: $producerReference[/optional/path]:$method
+        # 4. if $method is not in [copy, link, extract] then replace occurrences of the OutputReference string
+        #    in the arguments string with the Legacy DataReference string
+        #    else, if there is a fileref, replace occurrences of the OutputRef string in the arguments string with
+        #       the basename of the fileref. If there is no fileref in the OutputReference and it appears in the args
+        #       then raise an exception
+
+        def infer_closest_match(comp_location: typing.List[str], from_ref: str) -> typing.Tuple[
+            typing.Tuple[str],
+            typing.Optional[str],
+        ]:
+            best = None
+            largest_overlap = 0
+
+            for other_loc in uid_to_name:
+                overlap = 0
+                if len(comp_location) < len(other_loc):
+                    continue
+
+                for i in range(min(len(comp_location), len(other_loc))):
+                    if other_loc[i] != comp_location[i]:
+                        break
+                    overlap += 1
+
+                if overlap > largest_overlap:
+                    best = other_loc
+
+            if best:
+                if len(best) == len(comp_location):
+                    fileref = None
+                else:
+                    fileref = '/'.join(comp_location[len(best)+1:]).lstrip('/')
+
+                return best, fileref
+
+            raise ValueError(f"The Component {self.scope.location} contains the reference {from_ref} which does not "
+                             f"point to any known Components", uid_to_name)
+
+        for ref_str in parameters_output.union(arguments_output):
+            ref = OutputReference.from_str(ref_str)
+            producer, fileref = infer_closest_match(comp_location=ref.location, from_ref=ref_str)
+            stage, producer = uid_to_name[producer]
+
+            producer = f"stage{stage}.{producer}"
+
+            if fileref:
+                producer = '/'.join((producer, fileref))
+            new_ref_str = ':'.join((producer, ref.method))
+
+            self.flowir["command"]["arguments"] = self.flowir["command"]["arguments"].replace(ref_str, new_ref_str)
+            parameters_legacy.add(new_ref_str)
+
+        self.flowir["references"] = sorted(parameters_legacy.union(arguments_legacy))
 
     def resolve_parameter_references(self):
         """Utility method to replace all parameter references in @flowir with their values
@@ -1441,7 +1558,7 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
         raise experiment.model.errors.FlowIRConfigurationErrors(errors=errors)
 
     component_names: typing.Dict[str, int] = {}
-    uid_to_name: typing.Dict[typing.Tuple[str], str] = {}
+    uid_to_name: typing.Dict[typing.Tuple[str], typing.Tuple[int, str]] = {}
 
     for _, comp in components.items():
         assert isinstance(comp.scope.blueprint, Component)
@@ -1454,7 +1571,7 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
             prior = component_names[comp.step_name]
             name = "-".join((comp.step_name, number_to_roman_like_numeral(prior)))
 
-        uid_to_name[tuple(comp.scope.location)] = name
+        uid_to_name[tuple(comp.scope.location)] = (0, name)
         comp.flowir['name'] = name
 
     complete = experiment.model.frontends.flowir.FlowIRConcrete(
@@ -1462,9 +1579,6 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
         platform=experiment.model.frontends.flowir.FlowIR.LabelDefault,
         documents={},
     )
-
-    for _, comp in components.items():
-        comp.convert_outputreferences_to_datareferences(uid_to_name)
 
     def hash_environment(environment: typing.Dict[str, typing.Any]) -> typing.Tuple[typing.Tuple[str, str]]:
         hash: typing.List[typing.Tuple[str, str]] = []
@@ -1497,6 +1611,12 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
 
         command = comp.flowir["command"]
         command["environment"] = environment_name
+
+    # VV: After resolving the parameters, handle OutputReferences and Legacy DataReferences. This step **must**
+    # happen after resolving the parameters as the OutputReferences and Legacy DataReferences may be
+    # constructed inside the arguments by combining the values of 1 or more parameters with 0 or more literal strings
+    for _, comp in components.items():
+        comp.convert_outputreferences_to_datareferences(uid_to_name)
 
 
     # VV: At this point components are ready, start plopping them in the flowir

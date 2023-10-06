@@ -1287,6 +1287,10 @@ class ComponentFlowIR:
             # VV: this could be a component with a bunch of errors so we cannot trust its contents
             self.flowir["command"] = {}
 
+    @property
+    def step_name(self) -> str:
+        # VV: The step name is the last entry in the location of the Blueprint instance
+        return self.scope.location[-1]
 
     def _get_refs_in_param(self, pattern: str) -> typing.Dict[str, typing.List[str]]:
         refs = {}
@@ -1373,6 +1377,10 @@ class ComponentFlowIR:
                     pending.insert(0, Explore(location=location, value=value))
             elif isinstance(node.value, str):
                 node.replace_parameter_references(scope=self.scope, flowir=self.flowir)
+            elif isinstance(node.value, list):
+                for idx, value in enumerate(node.value):
+                    location = node.location + [idx]
+                    pending.insert(0, Explore(location=location, value=value))
 
 
 def number_to_roman_like_numeral(value: int) -> str:
@@ -1438,13 +1446,13 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
     for _, comp in components.items():
         assert isinstance(comp.scope.blueprint, Component)
 
-        if comp.scope.blueprint.signature.name not in component_names:
-            component_names[comp.scope.blueprint.signature.name] = 0
-            name = comp.scope.blueprint.signature.name
+        if comp.step_name not in component_names:
+            component_names[comp.step_name] = 0
+            name = comp.step_name
         else:
-            component_names[comp.scope.blueprint.signature.name] += 1
-            prior = component_names[comp.scope.blueprint.signature.name]
-            name = "-".join((comp.scope.blueprint.signature.name, number_to_roman_like_numeral(prior)))
+            component_names[comp.step_name] += 1
+            prior = component_names[comp.step_name]
+            name = "-".join((comp.step_name, number_to_roman_like_numeral(prior)))
 
         uid_to_name[tuple(comp.scope.location)] = name
         comp.flowir['name'] = name

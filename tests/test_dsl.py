@@ -80,6 +80,50 @@ def dsl_single_workflow_single_component_one_step() -> typing.Dict[str, typing.A
         arguments: "%(message)s %(other)s"        
     """)
 
+
+@pytest.fixture()
+def dsl_single_workflow_one_component_two_steps_no_edges() -> typing.Dict[str, typing.Any]:
+    return yaml.safe_load("""
+    entrypoint:
+      entry-instance: main
+      execute:
+      - args:
+          foo: world
+    workflows:
+    - signature:
+        name: main
+        parameters:
+        - name: foo
+      steps:
+        one: echo
+        two: echo
+      execute:
+      - target: <one>
+        args:
+          message: "hello from one"
+          other: "%(foo)s"
+      - target: <two>
+        args:
+          message: "hello from two"
+          other: "%(foo)s"
+    components:
+    - signature:
+        name: echo
+        parameters:
+        - name: message
+        - name: other
+          default: a default value
+        - name: environment
+          default:
+            DEFAULTS: PATH:LD_LIBRARY_PATH
+            AN_ENV_VAR: ITS_VALUE
+      command:
+        environment: "%(environment)s"
+        executable: echo
+        arguments: "%(message)s %(other)s"        
+    """)
+
+
 def test_parse_hallucinated_simple_dsl2(simple_flowir: experiment.model.frontends.flowir.DictFlowIR):
     graph = experiment.model.graph.WorkflowGraph.graphFromFlowIR(simple_flowir, {})
 
@@ -117,6 +161,20 @@ def test_parse_step_references(input_outputs: typing.Tuple[
     assert ref.to_str() == expected_rewrite
 
 
+def test_replace_many_parameter_references():
+    x = experiment.model.frontends.dsl._replace_many_parameter_references(
+        what="%(message)s %(other)s",
+        loc=[],
+        parameters= {
+            "message": "hello",
+            "other": "world",
+            "environment": {"hi": "there"}
+        },
+        field=[],
+    )
+
+    assert x == "hello world"
+
 
 def test_dsl2_single_workflow_single_component_single_step_no_datareferences(
     dsl_single_workflow_single_component_one_step: typing.Dict[str, typing.Any]
@@ -143,7 +201,7 @@ def test_dsl2_single_workflow_single_component_single_step_no_datareferences(
     assert len(flowir["components"]) == 1
     assert flowir["components"][0] == {
         "stage": 0,
-        "name": "echo",
+        "name": "greetings",
         "command": {
             "executable": "echo",
             "arguments": "hello world",
@@ -162,16 +220,55 @@ def test_dsl2_single_workflow_single_component_single_step_no_datareferences(
     assert len(errors) == 0
 
 
-def test_replace_many_parameter_references():
-    x = experiment.model.frontends.dsl._replace_many_parameter_references(
-        what="%(message)s %(other)s",
-        loc=[],
-        parameters= {
-            "message": "hello",
-            "other": "world",
-            "environment": {"hi": "there"}
-        },
-        field=[],
+def test_dsl2_single_workflow_one_component_two_steps_no_edges(
+    dsl_single_workflow_one_component_two_steps_no_edges: typing.Dict[str, typing.Any]
+):
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl_single_workflow_one_component_two_steps_no_edges)
+
+    print(
+        yaml.safe_dump(
+            namespace.dict(
+                exclude_unset=True,
+                exclude_none=True,
+                exclude_defaults=True,
+                by_alias=True
+            ),
+            sort_keys=False
+        )
     )
 
-    assert x == "hello world"
+    flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
+
+    print(yaml.safe_dump(flowir.raw(), sort_keys=False))
+
+    flowir = flowir.raw()
+    assert len(flowir["components"]) == 2
+    assert [x for x in flowir["components"] if x['name'] == 'one'][0] == {
+        "stage": 0,
+        "name": "one",
+        "command": {
+            "executable": "echo",
+            "arguments": "hello from one world",
+            "environment": "env0"
+        }
+    }
+
+    assert [x for x in flowir["components"] if x['name'] == 'two'][0] == {
+        "stage": 0,
+        "name": "two",
+        "command": {
+            "executable": "echo",
+            "arguments": "hello from two world",
+            "environment": "env0"
+        }
+    }
+
+    assert len(flowir["environments"]["default"]) == 1
+    assert flowir["environments"]["default"]["env0"] == {
+        "DEFAULTS": "PATH:LD_LIBRARY_PATH",
+        "AN_ENV_VAR": "ITS_VALUE"
+    }
+
+    errors = experiment.model.frontends.flowir.FlowIR.validate(flowir=flowir, documents={})
+
+    assert len(errors) == 0

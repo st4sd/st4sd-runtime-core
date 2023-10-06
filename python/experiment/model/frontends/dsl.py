@@ -1503,6 +1503,11 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
     for _, comp in components.items():
         complete.add_component(comp.flowir)
 
+    for name, value in scopes.instances[("entry-instance",)].parameters.items():
+        if value is None or isinstance(value, dict):
+            continue
+        complete.set_platform_global_variable(variable=name, value=value, platform="default")
+
     return complete
 
 

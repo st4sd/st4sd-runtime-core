@@ -94,6 +94,8 @@ def dsl_single_workflow_one_component_two_steps_no_edges() -> typing.Dict[str, t
         name: main
         parameters:
         - name: foo
+        - name: unused
+          default: value-unused
       steps:
         one: echo
         two: echo
@@ -272,3 +274,8 @@ def test_dsl2_single_workflow_one_component_two_steps_no_edges(
     errors = experiment.model.frontends.flowir.FlowIR.validate(flowir=flowir, documents={})
 
     assert len(errors) == 0
+
+    assert flowir["variables"]["default"]["global"] == {
+        "foo": "world",
+        "unused": "value-unused"
+    }

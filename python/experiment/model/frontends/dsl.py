@@ -858,24 +858,36 @@ class ScopeBook:
         def name(self) -> str:
             return self.location[-1]
 
-        def verify_parameters(self) -> typing.List[Exception]:
+        def dsl_location(self) -> typing.List[str]:
+            bp_type = "workflows" if isinstance(self.blueprint, Workflow) else "components"
+            return [bp_type, self.blueprint.signature.name]
+
+        def verify_parameters(self, caller_location: experiment.model.errors.DSLLocation) -> typing.List[Exception]:
             """Utility method to verify the parameters of a scope
 
-             Returns:
-                 An array of errors explaining problems
+             Args:
+                 caller_location:
+                    The location of the YAML field that instantiates this Blueprint
+
+             Raises:
+                 experiment.model.errors.DSLInvalidError:
+                    If the caller of the Blueprint references unknown parameters
             """
-            errors = []
+            dsl_error = experiment.model.errors.DSLInvalidError([])
 
             known_params = [p.name for p in self.blueprint.signature.parameters]
 
             for name in self.parameters:
                 if name not in known_params:
-                    errors.append(
-                        ValueError(f"Unknown parameter {name} for Blueprint {self.blueprint.signature.name} "
-                                   f"at location {self.location}")
+                    dsl_error.underlying_errors.append(
+                        experiment.model.errors.DSLInvalidFieldError(
+                            location=caller_location,
+                            underlying_error=ValueError(f"Unknown parameter {name}")
+                        )
                     )
 
-            return errors
+            if dsl_error.underlying_errors:
+                raise dsl_error
 
         def fold_in_defaults_of_parameters(self):
             """Utility method to update the @parameters ivar with default values to the parameters of the Blueprint
@@ -903,7 +915,12 @@ class ScopeBook:
                         scope_instances=scope_instances,
                     )
                 except ValueError as e:
-                    errors.append(e)
+                    errors.append(
+                        experiment.model.errors.DSLInvalidFieldError(
+                            location=self.dsl_location(),
+                            underlying_error=e
+                        )
+                    )
 
             return errors
 
@@ -922,12 +939,22 @@ class ScopeBook:
                         ensure_references_point_to_sibling_steps=ensure_references_point_to_sibling_steps,
                     )
                 except ValueError as e:
-                    errors.append(e)
+                    errors.append(
+                        experiment.model.errors.DSLInvalidFieldError(
+                            location=self.dsl_location(),
+                            underlying_error=e
+                        )
+                    )
 
                 try:
                     self.parameters[name] = self.replace_revamped_references(value=self.parameters[name])
                 except ValueError as e:
-                    errors.append(e)
+                    errors.append(
+                        experiment.model.errors.DSLInvalidFieldError(
+                            location=self.dsl_location(),
+                            underlying_error=e
+                        )
+                    )
 
             return errors
 
@@ -940,7 +967,12 @@ class ScopeBook:
                 try:
                     self.parameters[name] = self.replace_revamped_references(value=value)
                 except ValueError as e:
-                    errors.append(e)
+                    errors.append(
+                        experiment.model.errors.DSLInvalidFieldError(
+                            location=self.dsl_location(),
+                            underlying_error=e
+                        )
+                    )
 
             return errors
 
@@ -1011,13 +1043,22 @@ class ScopeBook:
             sibling_steps = []
             if len(self.location) > 1:
                 uid_parent = tuple(self.location[:-1])
+                parent_workflow_name = uid_parent[-1] if len(uid_parent) > 0 else "**missing**"
+
                 try:
                     parent_scope = scope_instances[uid_parent]
                 except KeyError:
-                    raise ValueError(f"Unable to identify the parent Workflow of {self.location}")
+                    raise experiment.model.errors.DSLInvalidFieldError(
+                        location=["workflows", parent_workflow_name],
+                        underlying_error=ValueError(f"Unable to identify the parent Workflow of {self.location}")
+                    )
 
                 if not isinstance(parent_scope.blueprint, Workflow):
-                    raise ValueError(f"The parent of {self.location} is not a Workflow but a {type(parent_scope)}")
+                    raise experiment.model.errors.DSLInvalidFieldError(
+                        location=["workflows", parent_workflow_name],
+                        underlying_error=ValueError(
+                            f"The parent of {self.location} is not a Workflow but a {type(parent_scope)}")
+                    )
 
                 sibling_steps=[x for x in parent_scope.blueprint.steps if x != self.name]
             else:
@@ -1034,11 +1075,13 @@ class ScopeBook:
                         # VV: This works even if the OutputReference contains a reference to a parameter
                         ref = OutputReference.from_str(match.group(0))
                         if not ref.location or ref.location[0] not in sibling_steps:
-                            # VV: FIXME THIS MUST BE WRONG
-                            #  What if I get a parameter that's pointing to a non sibling step ???
-                            raise ValueError(f"OutputReference {match.group(0)} in field {field} of Blueprint instance "
-                                             f"{self.location} does not reference any of the known siblings "
-                                             f"{sibling_steps}")
+
+                            raise experiment.model.errors.DSLInvalidFieldError(
+                                location=self.dsl_location() + (field or []),
+                                underlying_error=ValueError(
+                                    f"OutputReference {match.group(0)} does not reference any of the known siblings "
+                                    f"{sibling_steps}")
+                            )
 
             for pattern in [pattern_vanilla, pattern_nested]:
                 partial = ""
@@ -1064,7 +1107,12 @@ class ScopeBook:
         # The instance name, definition, and parameters of a Blueprint
         self.instances: typing.Dict[typing.Tuple[str], ScopeBook.ScopeEntry] = {}
 
-    def enter(self, name: str, parameters: typing.Dict[str, ParameterValueType], blueprint: Workflow):
+    def enter(
+            self,
+            name: str,
+            parameters: typing.Dict[str, ParameterValueType],
+            blueprint: typing.Union[Workflow, Component]
+    ):
         parameters = copy.deepcopy(parameters)
         errors = []
         location = self.get_location() + [name]
@@ -1074,6 +1122,8 @@ class ScopeBook:
         if uid in self.instances:
             errors.append(ValueError(f"Node has already been visited", location))
 
+        scope_entry = ScopeBook.ScopeEntry(location=location, parameters=parameters, blueprint=blueprint)
+
         for p in blueprint.signature.parameters:
             if p.name in parameters:
                 continue
@@ -1081,8 +1131,19 @@ class ScopeBook:
                 errors.append(ValueError(f"The step {p.name} in location {'/'.join(location)} "
                                          f"does not have a value or default"))
         if errors:
-            raise ValueError("\n".join([str(e) for e in errors]))
-        scope_entry = ScopeBook.ScopeEntry(location=location, parameters=parameters, blueprint=blueprint)
+            dsl_error = experiment.model.errors.DSLInvalidError([])
+            for e in errors:
+                if isinstance(e, experiment.model.errors.DSLInvalidFieldError):
+                    dsl_error.underlying_errors.append(e)
+                else:
+                    dsl_error.underlying_errors.append(
+                        experiment.model.errors.DSLInvalidFieldError(
+                            location=scope_entry.dsl_location(),
+                            underlying_error=e
+                        )
+                    )
+            raise dsl_error
+
         self.instances[uid] = scope_entry
 
         self.scopes.append(scope_entry)
@@ -1140,6 +1201,7 @@ class ScopeBook:
             )
         ]
 
+        dsl_error = experiment.model.errors.DSLInvalidError([])
         errors: typing.List[Exception] = []
 
         rg_param = re.compile(ParameterPattern)
@@ -1148,13 +1210,28 @@ class ScopeBook:
             if action == Action.Exit:
                 self.exit()
                 continue
+            try:
+                scope = self.enter(name=scope.name, parameters=scope.parameters, blueprint=scope.blueprint)
+            except experiment.model.errors.DSLInvalidError as e:
+                dsl_error.underlying_errors += e.underlying_errors
+                break
 
-            scope = self.enter(name=scope.name, parameters=scope.parameters, blueprint=scope.blueprint)
             remaining_scopes.insert(0, (Action.Exit, scope))
 
             location = self.get_location()
+            if location != ["entry-instance"]:
+                parent_scope = self.instances[tuple(location[:-1])]
+                parent_scope.dsl_location()
+                workflow: Workflow = parent_scope.blueprint
+                field_invoke_loc = ["workflows", workflow.signature.name] + ["execute"]
+                for idx, step in enumerate(workflow.execute):
+                    step: ExecuteStep = step
+                    if step.get_target() == scope.name:
+                        field_invoke_loc = ["workflows", workflow.signature.name] + ["execute", idx]
+            else:
+                field_invoke_loc = ["entrypoint", "execute", 0]
 
-            errors.extend(scope.verify_parameters())
+            scope.verify_parameters(field_invoke_loc)
             scope.fold_in_defaults_of_parameters()
 
             # VV: Argument values may ONLY reference parameters of the parent scope
@@ -1218,7 +1295,7 @@ class ScopeBook:
         errors = scope_book._seed_scope_instances(namespace=namespace)
 
         if errors:
-            raise experiment.model.errors.FlowIRConfigurationErrors(errors=errors)
+            raise experiment.model.errors.DSLInvalidError.from_errors(errors)
 
         # VV: TODO now find references to the env-vars by visiting the fields of the component
         # if any field other than `command.environment` references a dictionary record an error
@@ -1261,7 +1338,7 @@ class ScopeBook:
         #     print(type(scope.blueprint).__name__, scope.location, "parameters", scope.parameters)
 
         if errors:
-            raise experiment.model.errors.FlowIRConfigurationErrors(errors=errors)
+            raise experiment.model.errors.DSLInvalidError.from_errors(errors)
 
         return scope_book
 
@@ -1350,9 +1427,12 @@ class ComponentFlowIR:
         for match in pattern_output.finditer(args):
             ref = OutputReference.from_str(match.group(0))
             if not ref.method:
-                raise ValueError(f"The arguments of the Component {self.scope.location} contain a reference to "
+                raise experiment.model.errors.DSLInvalidFieldError(
+                    location=["components", self.scope.blueprint.signature.name, "command", "arguments"],
+                    underlying_error=ValueError(f"The arguments of {self.scope.location} contain a reference to "
                                  f"the output {match.group(0)} but the OutputReference is partial, it does not "
                                  f"end with a :$method suffix.")
+                )
 
         for name, value in self.scope.parameters.items():
             if not isinstance(value, str):
@@ -1371,9 +1451,16 @@ class ComponentFlowIR:
                         ]:
                             break
                     else:
-                        raise ValueError(f"The parameter {name}={value} of the Component {self.scope.location} "
-                                         f"is an OutputReference without a :$method and the :$method suffix "
-                                         f"cannot be inferred from the field command.arguments={args}")
+                        raise experiment.model.errors.DSLInvalidFieldError(
+                            location=[
+                                "components", self.scope.blueprint.signature.name, "signature", "parameters", name
+                            ],
+                            underlying_error=ValueError(
+                                f"The parameter {name}={value} of the Component {self.scope.location} "
+                                f"is an OutputReference without a :$method and the :$method suffix "
+                                f"cannot be inferred from the field command.arguments={args}"
+                            )
+                        )
 
         for match in pattern_legacy.finditer(args):
             arguments_legacy.add(match.group(0))
@@ -1422,8 +1509,13 @@ class ComponentFlowIR:
 
                 return best, fileref
 
-            raise ValueError(f"The Component {self.scope.location} contains the reference {from_ref} which does not "
-                             f"point to any known Components", uid_to_name)
+            raise experiment.model.errors.DSLInvalidFieldError(
+                location=self.scope.dsl_location(),
+                underlying_error=ValueError(
+                    f"The Component {self.scope.location} contains the reference {from_ref} which does not "
+                    f"point to any known Components", uid_to_name
+                )
+            )
 
         for ref_str in parameters_output.union(arguments_output):
             ref = OutputReference.from_str(ref_str)

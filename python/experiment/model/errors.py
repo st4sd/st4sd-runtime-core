@@ -4,6 +4,8 @@
 
 '''Module containing exception definitions'''
 from __future__ import print_function, annotations
+
+import typing
 from typing import TYPE_CHECKING, Any, List, Optional, Dict, Union, Tuple, Callable
 from six import string_types
 import configparser
@@ -15,6 +17,8 @@ if TYPE_CHECKING:
 
     ExperimentSource = Union[
         experiment.model.storage.ExperimentPackage, experiment.model.storage.ExperimentInstanceDirectory]
+
+DSLLocation = List[Union[str, int]]
 
 # VV: FlowIR Errors
 
@@ -157,6 +161,46 @@ class FlowIRSyntaxException(FlowException):
     def __str__(self):
         return self.message
 
+
+class DSLInvalidFieldError(Exception):
+    def __init__(self, location: typing.List[str], underlying_error: Exception):
+        self.location = location
+        self.underlying_error = underlying_error
+
+    def __str__(self):
+        return "DSL Error at " + "/".join(map(str, self.location)) + ": " + str(self.underlying_error)
+
+
+class DSLInvalidError(FlowIRException):
+    def __init__(self, underlying_errors: typing.List[DSLInvalidFieldError]):
+        self.underlying_errors = underlying_errors
+
+    def __str__(self):
+        return f"DSL contains {len(self.underlying_errors)} error(s):\n" + "\n".join(map(self.underlying_errors))
+
+    def errors(self) -> typing.List[typing.Dict[str, typing.Any]]:
+        return [
+            {
+                "location": e.location,
+                "error": str(e.underlying_error)
+            } for e in self.underlying_errors
+        ]
+
+    @classmethod
+    def from_errors(cls, errors: List[Union[DSLInvalidFieldError, Exception]]):
+        dsl_error = cls([])
+
+        for e in errors:
+            if isinstance(e, DSLInvalidFieldError):
+                dsl_error.underlying_errors.append(e)
+            else:
+                dsl_error.underlying_errors.append(
+                    DSLInvalidFieldError(
+                        location=[],
+                        underlying_error=e
+                    )
+                )
+        return dsl_error
 
 class FlowIRNotDictionary(FlowIRSyntaxException):
     def __init__(self, what: Any):

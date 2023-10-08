@@ -672,7 +672,7 @@ def _replace_many_parameter_references(
 
     while True:
         for match in rg_parameter.finditer(what, pos=start):
-            if match:
+            if match and match.group(0) != "%(replica)s":
                 break
         else:
             return what
@@ -732,7 +732,8 @@ def replace_parameter_references(
             return False
 
         if isinstance(what, str):
-            return rg_parameter.search(what) is not None
+            match =rg_parameter.search(what)
+            return match is not None and match.group(0) != "%(replica)s"
         return False
 
     current_location = list(location)
@@ -1245,6 +1246,8 @@ class ScopeBook:
                         param = match[2:-2]
 
                         if param not in parent_parameters:
+                            if param == "replica":
+                                continue
                             errors.append(KeyError(
                                 f"Node {location} references the parameter {param} but its parent "
                                 f"does not have such a parameter, it has {parent_parameters}"))

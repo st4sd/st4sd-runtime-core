@@ -248,7 +248,8 @@ class ExecuteStep(pydantic.BaseModel):
         extra = "forbid"
 
     target: TargetReference = pydantic.Field(
-        description="Reference to a step name. A string enclosed in <> e.g. <foo>", min_length=3
+        description="Reference to a step name. A string enclosed in <> e.g. <foo>", min_length=3,
+        regex=fr"<{StepNamePattern}>",
     )
 
     args: typing.Optional[typing.Dict[str, ParameterValueType]] = pydantic.Field(
@@ -857,7 +858,7 @@ class ScopeBook:
             blueprint: typing.Union[Workflow, Component]
         ):
             self.location = location
-            self.parameters = parameters
+            self.parameters = parameters or {}
             self.blueprint = blueprint.copy(deep=True)
 
         @property

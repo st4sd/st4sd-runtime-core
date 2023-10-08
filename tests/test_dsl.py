@@ -245,6 +245,8 @@ def test_parse_hallucinated_simple_dsl2(simple_flowir: experiment.model.frontend
     ('<workflow>', ["workflow"], None, "<workflow>"),
     ("<workflow/component/file>", ["workflow", "component", "file"], None, "<workflow/component/file>"),
     ('"<workflow/component>"/file', ["workflow", "component", "file"], None, "<workflow/component/file>"),
+    ('<stage0.XYZToGAMESS>/molecule.inp:copy', ["stage0.XYZToGAMESS", "molecule.inp"], "copy",
+        "<stage0.XYZToGAMESS/molecule.inp>:copy")
 ])
 def test_parse_step_references(input_outputs: typing.Tuple[
     str, typing.List[str], typing.Optional[str], str,

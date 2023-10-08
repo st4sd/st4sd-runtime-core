@@ -113,7 +113,8 @@ StepNameOrPathPattern = r"[^/:]+"
 PatternReferenceMethod = f"(:(?P<method>(ref|copy|output|link|extract)))"
 
 BlueprintPattern = rf"{StepNamePattern}(/({StepNameOrPathPattern}))*"
-OutputReferenceVanilla = rf"(?P<location>(<{BlueprintPattern}/?>)){PatternReferenceMethod}?"
+OutputReferenceVanilla = (rf"(?P<location>(<{BlueprintPattern}/?>))(/(?P<location_nested>{BlueprintPattern}))?"
+                          rf"{PatternReferenceMethod}?")
 OutputReferenceNested = rf'(?P<location>"<{BlueprintPattern}>")(/(?P<location_nested>{BlueprintPattern}))?'\
                              rf'{PatternReferenceMethod}?'
 RevampedReferencePattern = fr'"(?P<reference>([.a-zA-Z0-9_/-])+)"{PatternReferenceMethod}'
@@ -167,6 +168,10 @@ class OutputReference:
             groups = match.groupdict()
             # VV: get rid of `<` and `>` then a possibly trailing `/`, whatever is left is the location of the output
             location = groups['location'][1:-1].rstrip("/").split("/")
+
+            if  groups.get("location_nested") is not None:
+                location_nested = groups['location_nested'].rstrip("/").split("/")
+                location.extend(location_nested)
 
             if groups.get("method") is not None:
                 method = groups["method"]
@@ -1451,7 +1456,7 @@ class ComponentFlowIR:
                     # it **must** appear somewhere in the arguments
                     search = match.group(0) + ":"
                     for x in arguments_output:
-                        if x.startswith(search) and arguments_output[len(search):] in [
+                        if x.startswith(search) and x[len(search):] in [
                             "copy", "link", "ref", "output", "extract"
                         ]:
                             break

@@ -811,17 +811,17 @@ class Entrypoint(pydantic.BaseModel):
     class Config:
         extra = "forbid"
 
+    # VV: FIXME Rename this into "entryInstance" (i.e. remove the alias)
+    entryInstance: str = pydantic.Field(
+        description="The identifier of the entrypoint blueprint",
+        alias="entry-instance"
+    )
+
     execute: typing.List[ExecuteStepEntryInstance] = pydantic.Field(
         [],
         min_items=1,
         max_items=1,
         description="How to execute the instance of the entrypoint blueprint in this namespace"
-    )
-
-    # VV: FIXME Rename this into "entryInstance" (i.e. remove the alias)
-    entryInstance: str = pydantic.Field(
-        description="The identifier of the entrypoint blueprint",
-        alias="entry-instance"
     )
 
 

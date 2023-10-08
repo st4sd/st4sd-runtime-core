@@ -219,6 +219,320 @@ def dsl_two_workflows_one_component_one_step() -> typing.Dict[str, typing.Any]:
 
 
 
+@pytest.fixture()
+def dsl_band_gap_pm3_gamess_us() -> typing.Dict[str, typing.Any]:
+    return yaml.safe_load("""
+    entrypoint:
+      entry-instance: main
+      execute:
+      - args:
+          backend: kubernetes
+          basis: GBASIS=PM3
+          collabel: label
+          gamess-command: bin/run-gamess.sh
+          gamess-gpus: '0'
+          gamess-grace-period-seconds: '1800'
+          gamess-image: nvcr.io/hpc/gamess:17.09-r2-libcchem
+          gamess-restart-hook-file: semi_empirical_restart.py
+          gamess-version: '00'
+          gamess-walltime-minutes: '700'
+          mem: '4295000000'
+          number-processors: '8'
+          numberMolecules: '1'
+          startIndex: '0'
+          input.input_smiles.csv: input/input_smiles.csv
+          data.input_molecule.txt: data/input_molecule.txt
+    workflows:
+    - signature:
+        name: main
+        parameters:
+        - name: input.input_smiles.csv
+        - name: data.input_molecule.txt
+          default: data/input_molecule.txt
+        - name: backend
+          default: kubernetes
+        - name: basis
+          default: GBASIS=PM3
+        - name: collabel
+          default: label
+        - name: gamess-command
+          default: bin/run-gamess.sh
+        - name: gamess-gpus
+          default: '0'
+        - name: gamess-grace-period-seconds
+          default: '1800'
+        - name: gamess-image
+          default: nvcr.io/hpc/gamess:17.09-r2-libcchem
+        - name: gamess-restart-hook-file
+          default: semi_empirical_restart.py
+        - name: gamess-version
+          default: '00'
+        - name: gamess-walltime-minutes
+          default: '700'
+        - name: mem
+          default: '4295000000'
+        - name: number-processors
+          default: '8'
+        - name: numberMolecules
+          default: '1'
+        - name: startIndex
+          default: '0'
+      steps:
+        stage0.GetMoleculeIndex: stage0.GetMoleculeIndex
+        stage0.SetBasis: stage0.SetBasis
+        stage1.CreateLabels: stage1.CreateLabels
+        stage0.SMILESToXYZ: stage0.SMILESToXYZ
+        stage0.XYZToGAMESS: stage0.XYZToGAMESS
+        stage1.GeometryOptimisation: stage1.GeometryOptimisation
+        stage1.ExtractEnergies: stage1.ExtractEnergies
+      execute:
+      - target: <stage0.GetMoleculeIndex>
+        args:
+          numberMolecules: '%(numberMolecules)s'
+          replica: '%(replica)s'
+          startIndex: '%(startIndex)s'
+      - target: <stage0.SetBasis>
+        args:
+          basis: '%(basis)s'
+          param0: '"%(data.input_molecule.txt)s":copy'
+      - target: <stage1.CreateLabels>
+        args:
+          collabel: '%(collabel)s'
+          param0: <stage0.GetMoleculeIndex>:output
+          param1: '"%(input.input_smiles.csv)s":ref'
+      - target: <stage0.SMILESToXYZ>
+        args:
+          backend: '%(backend)s'
+          param0: '"%(input.input_smiles.csv)s":copy'
+          param1: <stage0.GetMoleculeIndex>:output
+      - target: <stage0.XYZToGAMESS>
+        args:
+          backend: '%(backend)s'
+          param0: <stage0.SMILESToXYZ>:ref
+          param1: <stage0.SetBasis>/input_molecule.txt:ref
+          param2: <stage0.GetMoleculeIndex>:output
+      - target: <stage1.GeometryOptimisation>
+        args:
+          backend: '%(backend)s'
+          gamess-command: '%(gamess-command)s'
+          gamess-gpus: '%(gamess-gpus)s'
+          gamess-grace-period-seconds: '%(gamess-grace-period-seconds)s'
+          gamess-image: '%(gamess-image)s'
+          gamess-restart-hook-file: '%(gamess-restart-hook-file)s'
+          gamess-version: '%(gamess-version)s'
+          gamess-walltime-minutes: '%(gamess-walltime-minutes)s'
+          mem: '%(mem)s'
+          number-processors: '%(number-processors)s'
+          param0: <stage0.XYZToGAMESS>/molecule.inp:copy
+      - target: <stage1.ExtractEnergies>
+        args:
+          backend: '%(backend)s'
+          param0: <stage1.GeometryOptimisation>:ref
+          param1: <stage1.CreateLabels>:output
+    components:
+    - signature:
+        name: stage0.GetMoleculeIndex
+        parameters:
+        - name: numberMolecules
+        - name: replica
+        - name: startIndex
+      command:
+        executable: python
+        arguments: -c "print(%(startIndex)s + %(replica)s),"
+      workflowAttributes:
+        restartHookOn:
+        - ResourceExhausted
+        replicate: '%(numberMolecules)s'
+        repeatRetries: 3
+        memoization:
+          disable: {}
+      resourceRequest: {}
+      resourceManager:
+        config: {}
+        lsf: {}
+        kubernetes: {}
+        docker:
+          imagePullPolicy: Always
+    - signature:
+        name: stage0.SetBasis
+        parameters:
+        - name: param0
+        - name: basis
+      command:
+        executable: sed
+        interpreter: bash
+        arguments: -i'.bak' -e 's/#BASIS#/%(basis)s/g' input_molecule.txt
+        expandArguments: none
+      workflowAttributes:
+        restartHookOn:
+        - ResourceExhausted
+        repeatRetries: 3
+        memoization:
+          disable: {}
+      resourceRequest: {}
+      resourceManager:
+        config: {}
+        lsf: {}
+        kubernetes: {}
+        docker:
+          imagePullPolicy: Always
+    - signature:
+        name: stage1.CreateLabels
+        parameters:
+        - name: param0
+        - name: param1
+        - name: collabel
+      command:
+        executable: python
+        arguments: -c "import pandas;  input_file='%(param1)s';  row_indices='%(param0)s';  m=pandas.read_csv(input_file,
+          engine='python', sep=None);  print(','.join([str(m.iloc[int(index)]['%(collabel)s'])
+          for index in row_indices.split()]))"
+        expandArguments: none
+      workflowAttributes:
+        restartHookOn:
+        - ResourceExhausted
+        aggregate: true
+        repeatRetries: 3
+        memoization:
+          disable: {}
+      resourceRequest: {}
+      resourceManager:
+        config: {}
+        lsf: {}
+        kubernetes: {}
+        docker:
+          imagePullPolicy: Always
+    - signature:
+        name: stage0.SMILESToXYZ
+        parameters:
+        - name: param0
+        - name: param1
+        - name: backend
+        - name: env-vars
+          default: {}
+      command:
+        executable: bin/rdkit_smiles2coordinates.py
+        arguments: --input input_smiles.csv --row %(param1)s
+        environment: '%(env-vars)s'
+      workflowAttributes:
+        restartHookOn:
+        - ResourceExhausted
+        repeatRetries: 3
+        memoization:
+          disable: {}
+      resourceRequest: {}
+      resourceManager:
+        config:
+          backend: '%(backend)s'
+        lsf: {}
+        kubernetes:
+          image: quay.io/st4sd/community-applications/rdkit-st4sd:2019.09.1
+        docker:
+          imagePullPolicy: Always
+    - signature:
+        name: stage0.XYZToGAMESS
+        parameters:
+        - name: param0
+        - name: param1
+        - name: param2
+        - name: backend
+        - name: env-vars
+          default: {}
+      command:
+        executable: bin/make_gamess_input_from_template_and_xyz.py
+        arguments: -xp %(param0)s -xf %(param2)s -g %(param1)s -sp %(param0)s -sf %(param2)s
+        environment: '%(env-vars)s'
+      workflowAttributes:
+        restartHookOn:
+        - ResourceExhausted
+        repeatRetries: 3
+        memoization:
+          disable: {}
+      resourceRequest: {}
+      resourceManager:
+        config:
+          backend: '%(backend)s'
+        lsf: {}
+        kubernetes:
+          image: quay.io/st4sd/community-applications/rdkit-st4sd:2019.09.1
+        docker:
+          imagePullPolicy: Always
+    - signature:
+        name: stage1.GeometryOptimisation
+        parameters:
+        - name: param0
+        - name: backend
+        - name: gamess-command
+        - name: gamess-gpus
+        - name: gamess-grace-period-seconds
+        - name: gamess-image
+        - name: gamess-restart-hook-file
+        - name: gamess-version
+        - name: gamess-walltime-minutes
+        - name: mem
+        - name: number-processors
+        - name: env-vars
+          default:
+            PATH: /usr/local/bin/:/usr/local/bin/:/venvs/st4sd-runtime-core/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            VERNO: '00'
+      command:
+        executable: '%(gamess-command)s'
+        arguments: molecule.inp %(gamess-version)s %(number-processors)s
+        environment: '%(env-vars)s'
+      workflowAttributes:
+        restartHookFile: '%(gamess-restart-hook-file)s'
+        restartHookOn:
+        - KnownIssue
+        - Success
+        - ResourceExhausted
+        shutdownOn:
+        - KnownIssue
+        repeatRetries: 3
+        memoization:
+          disable: {}
+      resourceRequest:
+        numberThreads: '%(number-processors)s'
+        memory: '%(mem)s'
+        gpus: '%(gamess-gpus)s'
+      resourceManager:
+        config:
+          backend: '%(backend)s'
+          walltime: '%(gamess-walltime-minutes)s'
+        lsf: {}
+        kubernetes:
+          image: '%(gamess-image)s'
+          gracePeriod: '%(gamess-grace-period-seconds)s'
+        docker:
+          imagePullPolicy: Always
+    - signature:
+        name: stage1.ExtractEnergies
+        parameters:
+        - name: param0
+        - name: param1
+        - name: backend
+        - name: env-vars
+          default: {}
+      command:
+        executable: bin/extract_gmsout.py
+        arguments: -l %(param1)s %(param0)s
+        environment: '%(env-vars)s'
+      workflowAttributes:
+        restartHookOn:
+        - ResourceExhausted
+        aggregate: true
+        repeatRetries: 3
+        memoization:
+          disable: {}
+      resourceRequest: {}
+      resourceManager:
+        config:
+          backend: '%(backend)s'
+        lsf: {}
+        kubernetes:
+          image: quay.io/st4sd/community-applications/rdkit-st4sd:2019.09.1
+        docker:
+          imagePullPolicy: Always
+    """)
 
 
 def test_parse_hallucinated_simple_dsl2(simple_flowir: experiment.model.frontends.flowir.DictFlowIR):
@@ -228,12 +542,24 @@ def test_parse_hallucinated_simple_dsl2(simple_flowir: experiment.model.frontend
 
     namespace = experiment.model.frontends.dsl.Namespace(**dsl)
 
-    print(yaml.safe_dump(namespace.dict(exclude_unset=True, exclude_defaults=True, exclude_none=True), indent=2))
+    print(yaml.safe_dump(namespace.dict(
+        by_alias=True, exclude_unset=True, exclude_defaults=True, exclude_none=True), indent=2))
 
     print("-----------")
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
     print(yaml.safe_dump(flowir.raw(), indent=2))
 
+
+def test_parse_band_gap_pm3_gamess_us(dsl_band_gap_pm3_gamess_us: typing.Dict[str, typing.Any]):
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl_band_gap_pm3_gamess_us)
+
+    print(yaml.safe_dump(namespace.dict(
+        by_alias=True, exclude_unset=True, exclude_defaults=True, exclude_none=True), indent=2))
+    print("-----------")
+    flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
+    print(yaml.safe_dump(flowir.raw(), indent=2))
+
+    errors = experiment.model.frontends.flowir.FlowIR.validate(flowir=flowir.raw(), documents={})
 
 @pytest.mark.parametrize("input_outputs", [
     ("<workflow/component/file>:ref", ["workflow", "component", "file"], "ref", "<workflow/component/file>:ref"),

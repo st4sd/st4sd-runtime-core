@@ -176,7 +176,10 @@ class DSLInvalidError(FlowIRException):
         self.underlying_errors = underlying_errors
 
     def __str__(self):
-        return f"DSL contains {len(self.underlying_errors)} error(s):\n" + "\n".join(map(self.underlying_errors))
+        return f"DSL contains {len(self.underlying_errors)} error(s):\n" + "\n".join(map(str, self.underlying_errors))
+
+    def __repr__(self):
+        return str(self)
 
     def errors(self) -> typing.List[typing.Dict[str, typing.Any]]:
         return [

@@ -1295,7 +1295,9 @@ class ScopeBook:
         errors = scope_book._seed_scope_instances(namespace=namespace)
 
         if errors:
-            raise experiment.model.errors.DSLInvalidError.from_errors(errors)
+            exc = experiment.model.errors.DSLInvalidError.from_errors(errors)
+            # print(exc)
+            raise exc
 
         # VV: TODO now find references to the env-vars by visiting the fields of the component
         # if any field other than `command.environment` references a dictionary record an error
@@ -1785,6 +1787,8 @@ def digest_dsl_component(
         environment = check_environment
     elif check_environment is "none":
         environment = {}
+    elif check_environment is None:
+        environment = None
     else:
         errors.append(ValueError(f"Environment of Component {scope.location} must either be a Dictionary of "
                                  f"key: value env-vars, be unset, or the string literal \"none\". However it is "

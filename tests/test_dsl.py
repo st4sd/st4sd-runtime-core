@@ -561,6 +561,21 @@ def test_parse_band_gap_pm3_gamess_us(dsl_band_gap_pm3_gamess_us: typing.Dict[st
 
     errors = experiment.model.frontends.flowir.FlowIR.validate(flowir=flowir.raw(), documents={})
 
+    components = sorted([
+        f"stage{comp['stage']}.{comp['name']}" for comp in flowir.get_components()
+    ])
+
+    assert components == sorted([
+        'stage0.GetMoleculeIndex',
+        'stage0.SMILESToXYZ',
+        'stage0.SetBasis',
+        'stage0.XYZToGAMESS',
+        'stage1.CreateLabels',
+        'stage1.ExtractEnergies',
+        'stage1.GeometryOptimisation'
+    ])
+
+
 @pytest.mark.parametrize("input_outputs", [
     ("<workflow/component/file>:ref", ["workflow", "component", "file"], "ref", "<workflow/component/file>:ref"),
     ('"<workflow/component>"/file:ref', ["workflow", "component", "file"], "ref", "<workflow/component/file>:ref"),

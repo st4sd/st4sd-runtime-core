@@ -1691,8 +1691,14 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
             prior = component_names[comp.step_name]
             name = "-".join((comp.step_name, number_to_roman_like_numeral(prior)))
 
-        uid_to_name[tuple(comp.scope.location)] = (0, name)
-        comp.flowir['name'] = name
+
+        match = pattern_name.fullmatch(name)
+        match_groups = match.groupdict()
+
+        uid_to_name[tuple(comp.scope.location)] = (int(match_groups.get("stage") or 0), match_groups["name"])
+
+        comp.flowir['name'] = uid_to_name[tuple(comp.scope.location)][1]
+        comp.flowir['stage'] = uid_to_name[tuple(comp.scope.location)][0]
 
     complete = experiment.model.frontends.flowir.FlowIRConcrete(
         flowir_0={},

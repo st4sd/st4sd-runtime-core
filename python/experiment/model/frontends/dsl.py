@@ -1733,7 +1733,13 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
         comp.resolve_parameter_references()
 
         environment = comp.environment
-        if not environment:
+        command = comp.flowir["command"]
+
+        if environment == {}:
+            command["environment"] = "none"
+            continue
+        elif environment is None:
+            command["environment"] = None
             continue
 
         dict_hash = hash_environment(environment)
@@ -1745,7 +1751,6 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
 
             complete.set_environment(environment_name, environment, platform="default")
 
-        command = comp.flowir["command"]
         command["environment"] = environment_name
 
     # VV: After resolving the parameters, handle OutputReferences and Legacy DataReferences. This step **must**

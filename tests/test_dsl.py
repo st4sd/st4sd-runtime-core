@@ -559,7 +559,9 @@ def test_parse_band_gap_pm3_gamess_us(dsl_band_gap_pm3_gamess_us: typing.Dict[st
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
     print(yaml.safe_dump(flowir.raw(), indent=2))
 
-    errors = experiment.model.frontends.flowir.FlowIR.validate(flowir=flowir.raw(), documents={})
+    errors = flowir.validate()
+
+    assert len(errors) == 0
 
     components = sorted([
         f"stage{comp['stage']}.{comp['name']}" for comp in flowir.get_components()
@@ -640,9 +642,9 @@ def test_dsl2_single_workflow_single_component_single_step_no_datareferences(fix
 
     print(yaml.safe_dump(flowir.raw(), sort_keys=False))
 
-    flowir = flowir.raw()
-    assert len(flowir["components"]) == 1
-    assert flowir["components"][0] == {
+    raw_flowir = flowir.raw()
+    assert len(raw_flowir["components"]) == 1
+    assert raw_flowir["components"][0] == {
         "stage": 0,
         "name": "greetings",
         "references": [],
@@ -653,13 +655,13 @@ def test_dsl2_single_workflow_single_component_single_step_no_datareferences(fix
         }
     }
 
-    assert len(flowir["environments"]["default"]) == 1
-    assert flowir["environments"]["default"]["env0"] == {
+    assert len(raw_flowir["environments"]["default"]) == 1
+    assert raw_flowir["environments"]["default"]["env0"] == {
         "DEFAULTS": "PATH:LD_LIBRARY_PATH",
         "AN_ENV_VAR": "ITS_VALUE"
     }
 
-    errors = experiment.model.frontends.flowir.FlowIR.validate(flowir=flowir, documents={})
+    errors = flowir.validate()
 
     assert len(errors) == 0
 
@@ -685,9 +687,9 @@ def test_dsl2_single_workflow_one_component_two_steps_no_edges(
 
     print(yaml.safe_dump(flowir.raw(), sort_keys=False))
 
-    flowir = flowir.raw()
-    assert len(flowir["components"]) == 2
-    assert [x for x in flowir["components"] if x['name'] == 'one'][0] == {
+    raw_flowir = flowir.raw()
+    assert len(raw_flowir["components"]) == 2
+    assert [x for x in raw_flowir["components"] if x['name'] == 'one'][0] == {
         "stage": 0,
         "name": "one",
         "references": [],
@@ -698,7 +700,7 @@ def test_dsl2_single_workflow_one_component_two_steps_no_edges(
         }
     }
 
-    assert [x for x in flowir["components"] if x['name'] == 'two'][0] == {
+    assert [x for x in raw_flowir["components"] if x['name'] == 'two'][0] == {
         "stage": 0,
         "name": "two",
         "references": [],
@@ -709,20 +711,22 @@ def test_dsl2_single_workflow_one_component_two_steps_no_edges(
         }
     }
 
-    assert len(flowir["environments"]["default"]) == 1
-    assert flowir["environments"]["default"]["env0"] == {
+    assert len(raw_flowir["environments"]["default"]) == 1
+    assert raw_flowir["environments"]["default"]["env0"] == {
         "DEFAULTS": "PATH:LD_LIBRARY_PATH",
         "AN_ENV_VAR": "ITS_VALUE"
     }
 
-    errors = experiment.model.frontends.flowir.FlowIR.validate(flowir=flowir, documents={})
 
-    assert len(errors) == 0
-
-    assert flowir["variables"]["default"]["global"] == {
+    assert raw_flowir["variables"]["default"]["global"] == {
         "foo": "world",
         "unused": "value-unused"
     }
+
+    errors = flowir.validate()
+
+    assert len(errors) == 0
+
 
 
 def test_dsl2_single_workflow_one_component_two_steps_with_edges(
@@ -746,9 +750,9 @@ def test_dsl2_single_workflow_one_component_two_steps_with_edges(
 
     print(yaml.safe_dump(flowir.raw(), sort_keys=False))
 
-    flowir = flowir.raw()
-    assert len(flowir["components"]) == 2
-    assert [x for x in flowir["components"] if x['name'] == 'one'][0] == {
+    raw_flowir = flowir.raw()
+    assert len(raw_flowir["components"]) == 2
+    assert [x for x in raw_flowir["components"] if x['name'] == 'one'][0] == {
         "stage": 0,
         "name": "one",
         "references": [],
@@ -759,7 +763,7 @@ def test_dsl2_single_workflow_one_component_two_steps_with_edges(
         }
     }
 
-    assert [x for x in flowir["components"] if x['name'] == 'two'][0] == {
+    assert [x for x in raw_flowir["components"] if x['name'] == 'two'][0] == {
         "stage": 0,
         "name": "two",
         "references": [
@@ -772,17 +776,16 @@ def test_dsl2_single_workflow_one_component_two_steps_with_edges(
         }
     }
 
-    assert len(flowir["environments"]["default"]) == 1
-    assert flowir["environments"]["default"]["env0"] == {
+    assert len(raw_flowir["environments"]["default"]) == 1
+    assert raw_flowir["environments"]["default"]["env0"] == {
         "DEFAULTS": "PATH:LD_LIBRARY_PATH",
         "AN_ENV_VAR": "ITS_VALUE"
     }
 
-    errors = experiment.model.frontends.flowir.FlowIR.validate(flowir=flowir, documents={})
-
-    assert len(errors) == 0
-
-    assert flowir["variables"]["default"]["global"] == {
+    assert raw_flowir["variables"]["default"]["global"] == {
         "foo": "world",
         "unused": "value-unused"
     }
+
+    errors = flowir.validate()
+    assert len(errors) == 0

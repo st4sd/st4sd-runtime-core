@@ -1124,7 +1124,7 @@ class ScopeStack:
         # The root of the namespace is what the entrypoint invokes, it's name is always `entry-instance`.
         # The values are the ScopeEntries which are effectively instances of a Blueprint i.e.
         # The instance name, definition, and parameters of a Blueprint
-        self.instances: typing.Dict[typing.Tuple[str], ScopeStack.Scope] = {}
+        self.scopes: typing.Dict[typing.Tuple[str], ScopeStack.Scope] = {}
 
     def enter(
             self,
@@ -1138,7 +1138,7 @@ class ScopeStack:
 
         uid = tuple(location)
 
-        if uid in self.instances:
+        if uid in self.scopes:
             errors.append(ValueError(f"Node has already been visited", location))
 
         scope_entry = ScopeStack.Scope(location=location, parameters=parameters, blueprint=blueprint)
@@ -1163,7 +1163,7 @@ class ScopeStack:
                     )
             raise dsl_error
 
-        self.instances[uid] = scope_entry
+        self.scopes[uid] = scope_entry
 
         self.stack.append(scope_entry)
 
@@ -1186,7 +1186,7 @@ class ScopeStack:
     def get_parent_parameter_names(self) -> typing.List[str]:
         if self.depth() > 1:
             uid = tuple(self.get_location()[:-1])
-            scope = self.instances[uid]
+            scope = self.scopes[uid]
             return sorted(scope.parameters)
 
         return []
@@ -1239,7 +1239,7 @@ class ScopeStack:
 
             location = self.get_location()
             if location != ["entry-instance"]:
-                parent_scope = self.instances[tuple(location[:-1])]
+                parent_scope = self.scopes[tuple(location[:-1])]
                 parent_scope.dsl_location()
                 workflow: Workflow = parent_scope.blueprint
                 field_invoke_loc = ["workflows", workflow.signature.name] + ["execute"]
@@ -1336,28 +1336,28 @@ class ScopeStack:
             # After we resolve parameters, we can go ahead and resolve the OutputReferences again without performing
             # the above sibling-step check.
             errors.extend(scope.resolve_output_references_of_instance(
-                    all_scopes=scope_stack.instances,
+                    all_scopes=scope_stack.scopes,
                     ensure_references_point_to_sibling_steps=True,
                 )
             )
-            scope_errors.extend(scope.resolve_parameter_references_of_instance(all_scopes=scope_stack.instances))
-            scope_errors.extend(scope.resolve_legacy_data_references(all_scopes=scope_stack.instances))
+            scope_errors.extend(scope.resolve_parameter_references_of_instance(all_scopes=scope_stack.scopes))
+            scope_errors.extend(scope.resolve_legacy_data_references(all_scopes=scope_stack.scopes))
             scope_errors.extend(scope.resolve_output_references_of_instance(
-                    all_scopes=scope_stack.instances,
+                    all_scopes=scope_stack.scopes,
                     ensure_references_point_to_sibling_steps=False,
                 )
             )
             return  scope_errors
 
-        for location, scope in scope_stack.instances.items():
+        for location, scope in scope_stack.scopes.items():
             if isinstance(scope.blueprint, Workflow):
                 errors.extend(resolve_scope(scope=scope, scope_stack=scope_stack))
 
-        for location, scope in scope_stack.instances.items():
+        for location, scope in scope_stack.scopes.items():
             if isinstance(scope.blueprint, Component):
                 errors.extend(resolve_scope(scope=scope, scope_stack=scope_stack))
 
-        # for location, scope in scope_stack.instances.items():
+        # for location, scope in scope_stack.scopes.items():
         #     print(type(scope.blueprint).__name__, scope.location, "parameters", scope.parameters)
 
         if errors:
@@ -1648,26 +1648,36 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
     3. build a mapping of unique node identifiers to the blueprint that they reference
     4. after visiting all nodes if there're any errors raise an exception and stop, else:
     5. revisit all Component nodes (order doesn't matter) and:
-       - generate unique names for components
+       - generate unique names for components (resolve name conflicts by appending roman numerals to component names)
        - generate unique names for environments (if 2 environments contain identical env-vars they're the same)
-
+       - rewrite OutputReferences to Legacy DataReferences
+       - resolve all parameters to flowir
+    6. Hallucinate global variables. One for each parameter of `<entry-instance>`. These global variables are
+       hallucinated in that there are no references to them by any component. Recall that all parameters have been
+       fully resolved as part of step 5. The hallucinated global variables are only here so that if something
+       (e.g. st4sd-runtime-service) reads the FlowIR it gets some hints about the names of "variables" that this
+       DSL 2 Namespace uses as parameters.
 
     Args:
         namespace: the namespace to convert
 
     Returns:
         A FlowIRConcrete instance
+
+    Raises:
+        experiment.model.errors.DSLInvalidError:
+            When there are errors
     """
     scopes =  ScopeStack.from_namespace(namespace)
 
     components: typing.Dict[typing.Tuple[str], ComponentFlowIR] = {}
     errors = []
 
-    for location, scope in scopes.instances.items():
+    for location, scope in scopes.scopes.items():
         if isinstance(scope.blueprint, Component):
             comp_flowir = digest_dsl_component(
                 scope=scope,
-                all_scopes=scopes.instances
+                all_scopes=scopes.scopes
             )
             errors.extend(comp_flowir.errors)
             components[tuple(scope.location)] = comp_flowir
@@ -1744,11 +1754,15 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
     for _, comp in components.items():
         comp.convert_outputreferences_to_datareferences(uid_to_name)
 
+    all_errors = sum([comp.errors for comp in components.values()], [])
+    if all_errors:
+        raise experiment.model.errors.DSLInvalidError.from_errors(all_errors)
+
     # VV: At this point components are ready, start plopping them in the flowir
     for _, comp in components.items():
         complete.add_component(comp.flowir)
 
-    for name, value in scopes.instances[("entry-instance",)].parameters.items():
+    for name, value in scopes.scopes[("entry-instance",)].parameters.items():
         if value is None or isinstance(value, dict):
             continue
         complete.set_platform_global_variable(variable=name, value=value, platform="default")
@@ -1790,8 +1804,11 @@ def digest_dsl_component(
         errors. If there's more than 1 error, the information in the ComponentFlowIR may be incomplete
     """
     if not isinstance(scope.blueprint, Component):
+        exc = ValueError(f"Node {scope.location} was expected to be a Component not a {scope.blueprint}")
+        exc = experiment.model.errors.DSLInvalidFieldError(location=scope.dsl_location(), underlying_error=exc)
+
         return ComponentFlowIR(
-            errors=[ValueError(f"Node {scope.location} was expected to be a Component not a {scope.blueprint}")],
+            errors=[exc],
             environment=None,
             scope=scope,
         )
@@ -1809,8 +1826,11 @@ def digest_dsl_component(
         # VV: get rid of $( and )s
         param_name = check_environment[2:-2]
         if param_name not in scope.parameters:
-            errors.append(ValueError(f"The Component {scope.location} uses the parameter {param_name} to set its"
-                                     f"environment, but the component does not have such a parameter"))
+            exc = ValueError(f"The Component {scope.location} uses the parameter {param_name} to set its"
+                                     f"environment, but the component does not have such a parameter")
+            exc = experiment.model.errors.DSLInvalidFieldError(
+                location=scope.dsl_location() + ["signature", "environment"], underlying_error=exc)
+            errors.append(exc)
 
         check_environment = scope.parameters[param_name]
 
@@ -1821,9 +1841,13 @@ def digest_dsl_component(
     elif check_environment is None:
         environment = None
     else:
-        errors.append(ValueError(f"Environment of Component {scope.location} must either be a Dictionary of "
+        exc = ValueError(f"Environment of Component {scope.location} must either be a Dictionary of "
                                  f"key: value env-vars, be unset, or the string literal \"none\". However it is "
-                                 f"{check_environment}"))
+                                 f"{check_environment}")
+        exc = experiment.model.errors.DSLInvalidFieldError(
+            location=scope.dsl_location() + ["signature", "environment"], underlying_error=exc)
+        errors.append(exc)
+
     ret = ComponentFlowIR(
         errors=errors,
         environment=environment,

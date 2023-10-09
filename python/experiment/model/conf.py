@@ -19,6 +19,7 @@ import traceback
 from typing import (TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type,
                     Union)
 
+import yaml
 from future.utils import raise_with_traceback
 
 import experiment.model.errors
@@ -1364,6 +1365,82 @@ class FlowIRExperimentConfiguration:
         return config_env
 
 
+class DSLExperimentConfiguration(FlowIRExperimentConfiguration):
+    @classmethod
+    def format_found_in_directory(cls, root_directory, is_instance, **kwargs):
+        # type: (str, bool, Dict[str, Any]) -> bool
+        # VV: TODO implement loading instances
+        if is_instance is True:
+            return False
+
+        path_to_main = cls._path_to_main_file(root_directory, is_instance, **kwargs)
+
+        if os.path.isfile(path_to_main):
+            with open(path_to_main, 'r') as f:
+                try:
+                    dictionary = yaml.safe_load(f)
+                    return isinstance(dictionary, dict) and "entrypoint" in dictionary and "components" in dictionary
+                except Exception:
+                    return False
+
+        return False
+
+
+    @classmethod
+    def _path_to_main_file(cls, root_directory, is_instance, **kwargs):
+        if is_instance is True:
+            return None
+
+        main_file = kwargs.get('dsl_file', 'dsl.yaml')
+        return os.path.join(root_directory, 'conf', main_file)
+
+    def __init__(
+            self,
+            path: Optional[str],
+            platform: Optional[str],
+            variable_files: Optional[List[str]],
+            system_vars: Optional[Dict[str, str]],
+            is_instance: bool,
+            createInstanceFiles: bool,
+            primitive: bool,
+            updateInstanceFiles: bool = True,
+            variable_substitute: bool = True,
+            manifest: "Optional[DictManifest]" = None,
+            validate: bool = True,
+            config_patches: Optional[Dict[int, List[str]]] = None,
+            expand_references: bool = True,
+            **kwargs):
+        import experiment.model.frontends.dsl
+        dsl_path = path
+        if os.path.isdir(path):
+            dsl_path = os.path.join(path, "conf", "dsl.yaml")
+
+        with open(dsl_path, 'r') as f:
+            dictionary = yaml.safe_load(f)
+
+        self.dsl_namespace = experiment.model.frontends.dsl.Namespace(**dictionary)
+
+        concrete = experiment.model.frontends.dsl.namespace_to_flowir(self.dsl_namespace)
+
+        super().__init__(
+            path=path,
+            platform=platform,
+            variable_files=variable_files,
+            system_vars=system_vars,
+            is_instance=is_instance,
+            createInstanceFiles=createInstanceFiles,
+            primitive=primitive,
+            updateInstanceFiles=updateInstanceFiles,
+            variable_substitute=variable_substitute,
+            manifest=manifest,
+            validate=validate,
+            config_patches=config_patches,
+            expand_references=expand_references,
+            concrete=concrete,
+            **kwargs
+        )
+
+
 class CWLExperimentConfiguration(FlowIRExperimentConfiguration):
     @classmethod
     def format_found_in_directory(cls, root_directory, is_instance, **kwargs):
@@ -1597,13 +1674,15 @@ class ExperimentConfigurationFactory(object):
         'flowir': FlowIRExperimentConfiguration,
         'dosini': DOSINIExperimentConfiguration,
         'cwl': CWLExperimentConfiguration,
+        'dsl': DSLExperimentConfiguration,
 
         CWLExperimentConfiguration: 'cwl',
         FlowIRExperimentConfiguration: 'flowir',
         DOSINIExperimentConfiguration: 'dosini',
+        DSLExperimentConfiguration: 'dsl',
     }
 
-    default_priority = ['cwl', 'dosini', 'flowir']
+    default_priority = ['cwl', 'dosini', 'dsl', 'flowir']
 
     @classmethod
     def get_config_parser(
@@ -1628,7 +1707,13 @@ class ExperimentConfigurationFactory(object):
             Type[FlowIRExperimentConfiguration] which is a Class that can parse the format at @path
         """
         if os.path.isfile(path):
-            _, file_extension = os.path.splitext(path)
+            with open(path, 'r') as f:
+                try:
+                    dictionary = yaml.safe_load(f)
+                    if isinstance(dictionary, dict) and "entrypoint" in dictionary and "components" in dictionary:
+                        return cls.format_map["dsl"]
+                except Exception:
+                    pass
             return cls.format_map['flowir']
 
         if format_priority and 'cwl' in format_priority and 'flowir' not in format_priority:

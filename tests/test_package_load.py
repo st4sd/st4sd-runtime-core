@@ -15,6 +15,7 @@ import experiment.test
 import experiment.model.storage
 import experiment.model.data
 import experiment.model.graph
+import experiment.model.frontends.dsl
 import uuid
 
 import pytest
@@ -23,6 +24,45 @@ from . import utils
 
 logger = logging.getLogger('test')
 
+
+def test_load_dsl2(output_dir):
+    dsl = experiment.model.frontends.dsl.Namespace(**yaml.safe_load("""
+    entrypoint:
+      entry-instance: main
+      execute:
+      - target: <entry-instance>
+    workflows:
+    - signature:
+        name: main
+        parameters: []
+      steps:
+        hello: echo
+      execute:
+      - target: <hello>
+        args:
+          message: hello world
+    components:
+    - signature:
+        name: echo
+        parameters:
+        - name: message
+      command:
+        executable: echo
+        arguments: "%(message)s"
+    """)).dict(by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True)
+
+    pkg_dir = os.path.join(output_dir, "workflow.package")
+    utils.populate_files(pkg_dir, {"conf/dsl.yaml": yaml.safe_dump(dsl)})
+
+    instance_dir = os.path.join(output_dir, "package.instance")
+    os.makedirs(instance_dir)
+    isValid, error, compExperiment = experiment.test.ValidatePackage(pkg_dir, location=instance_dir)
+
+    assert isValid
+    assert error is None
+
+    # VV: Now make sure that the package is valid - perform check_executable checks too
+    compExperiment.validateExperiment(ignoreTestExecutablesError=False)
 
 def test_load_yaml_with_special_folders(output_dir):
     tempdir = tempfile.gettempdir()

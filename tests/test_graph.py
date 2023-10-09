@@ -1,19 +1,11 @@
 # Copyright IBM Inc. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-
-# coding=UTF-8
-#
-# IBM Confidential
-# OCO Source Materials
-# 5747-SM3
-# (c) Copyright IBM Corp. 2021
-# The source code for this program is not published or otherwise
-# divested of its trade secrets, irrespective of what has
-# been deposited with the U.S. Copyright Office.
 # Author(s): Vassilis Vassiliadis
-# Contact: Vassilis.Vassiliadis@ibm.com
+
 
 from __future__ import print_function
+
+import typing
 
 import pytest
 
@@ -24,10 +16,17 @@ import experiment.model.errors
 import experiment.model.frontends.flowir
 import experiment.model.graph
 import experiment.model.frontends.dsl
+import experiment.test
+
+import os
 
 import yaml
 
 from . import utils
+
+from .test_dsl import (
+    dsl_one_workflow_one_component_one_step_no_datareferences,
+)
 
 
 def test_graph_from_dictionaries():
@@ -673,38 +672,37 @@ def test_graph_generate_new_dsl_workflow_double_reference_workflow_parameter():
     }
 
 
-def test_parse_simple_dsl2():
-    flowir = experiment.model.frontends.flowir.yaml_load("""
-        application-dependencies:
-          default:
-          - dataset
-        environments:
-          default:
-            my-env:
-              FOO: bar
+def test_graph_returns_actual_dsl2(
+    output_dir: str,
+    dsl_one_workflow_one_component_one_step_no_datareferences: typing.Dict[str, typing.Any],
+):
+    dsl = experiment.model.frontends.dsl.Namespace(**dsl_one_workflow_one_component_one_step_no_datareferences)
 
-        variables:
-          default:
-            global:
-              backend: kubernetes
+    # VV: command.environment poitns to the "environment" parameter. Resolve it fully here to double check that
+    # the DSL we get out of the workflowGraph is the actual DSL we stored in the file and not the hallucinated one
+    dsl.components[0].command.environment = [
+        p for p in dsl.components[0].signature.parameters if p.name == "environment"
+    ][0].default
 
-        components:
-        - name: hello
-          command:
-            executable: sh
-            arguments: -c "hello %(backend)s; ls -lth dataset:ref; cat input/msg.txt:ref"
-            expandArguments: "none"
-            environment: my-env
-          references:
-          - dataset:ref
-          - input/msg.txt:ref
-          - input/msg.txt:copy
-          - data/other.txt:copy
-        """)
-    graph = experiment.model.graph.WorkflowGraph.graphFromFlowIR(flowir, {})
+    dsl_raw = dsl.dict(
+        by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True
+    )
 
-    dsl = graph.to_dsl()
+    pkg_dir = os.path.join(output_dir, "workflow.package")
+    utils.populate_files(pkg_dir, {"conf/dsl.yaml": yaml.safe_dump(dsl_raw)})
 
-    dsl = experiment.model.frontends.dsl.Namespace(**dsl)
+    instance_dir = os.path.join(output_dir, "package.instance")
+    os.makedirs(instance_dir)
+    isValid, error, compExperiment = experiment.test.ValidatePackage(pkg_dir, location=instance_dir)
 
-    print(yaml.safe_dump(dsl.dict(exclude_unset=True, exclude_defaults=True, exclude_none=True), indent=2))
+    assert isValid
+
+    dsl_loaded = compExperiment.experimentGraph.to_dsl()
+
+    dsl = experiment.model.frontends.dsl.Namespace(**dsl_loaded)
+
+    # VV: The hallucinated environment would have been "%(env-vars)s"
+    assert dsl.components[0].command.environment == {
+        "DEFAULTS": "PATH:LD_LIBRARY_PATH",
+        "AN_ENV_VAR": "ITS_VALUE",
+    }

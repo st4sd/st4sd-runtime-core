@@ -2314,6 +2314,10 @@ class WorkflowGraph(object):
                   args: # Instantiate the class
                     parameter-name: parameter value # see notes
         """
+        configuration = self.configuration
+        if isinstance(configuration, experiment.model.conf.DSLExperimentConfiguration):
+            return configuration.dsl_namespace.dict(by_alias=True)
+
         platform_vars = self._concrete.get_platform_variables()[experiment.model.frontends.flowir.FlowIR.LabelGlobal]
         workflow = self.dsl_workflow_blueprint()
 

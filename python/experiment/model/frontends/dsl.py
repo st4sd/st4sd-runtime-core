@@ -367,19 +367,20 @@ class CResourceManagerLSF(pydantic.BaseModel):
         description="The reservation identifier to associate with the LSF task"
     )
 
-    @pydantic.root_validator(pre=True)
-    def val_hide_keys(cls, model: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
-        if not isinstance(model, typing.Dict):
-            return model
+    dockerImage: typing.Optional[str] = pydantic.Field(
+        None,
+        description="(deprecated) docker image"
+    )
 
-        for key in ["dockerImage", "dockerProfileApp", "dockerOptions"]:
-            try:
-                del model[key]
-            except KeyError:
-                pass
+    dockerProfileApp: typing.Optional[str] = pydantic.Field(
+        None,
+        description="(deprecated) profile app to use with docker"
+    )
 
-        return model
-
+    dockerOptions: typing.Optional[str] = pydantic.Field(
+        None,
+        description="(deprecated) docker options"
+    )
 
 
 class CResourceManagerKubernetes(pydantic.BaseModel):
@@ -415,25 +416,34 @@ class CResourceManagerKubernetes(pydantic.BaseModel):
                     "(advanced feature)."
     )
 
+    image_pull_secret: typing.Optional[str] = pydantic.Field(
+        None,
+        alias="image-pull-secret",
+        description="(deprecated) The name of a Secret to use when pulling images"
+    )
+
+    namespace: typing.Optional[str] = pydantic.Field(
+        None,
+        description="(deprecated) The name of the namespace to host the resulting Job"
+    )
+
+    api_key_var: typing.Optional[str] = pydantic.Field(
+        None,
+        alias="api-key-var",
+        description="(deprecated)"
+    )
+
+    host: typing.Optional[str] = pydantic.Field(
+        None,
+        description="(deprecated) The url to the Kubernetes REST API"
+    )
+
     @pydantic.validator("qos", pre=True)
     def val_to_lowercase(cls, value: typing.Optional[str]) -> typing.Optional[str]:
         if isinstance(value, str):
             value = value.lower()
 
         return value
-
-    @pydantic.root_validator(pre=True)
-    def val_hide_keys(cls, model: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
-        if not isinstance(model, typing.Dict):
-            return model
-
-        for key in ["image-pull-secret", "namespace", "api-key-var", "host"]:
-            try:
-                del model[key]
-            except KeyError:
-                pass
-
-        return model
 
 
 class CResourceManagerDocker(pydantic.BaseModel):
@@ -480,6 +490,36 @@ class CResourceManager(pydantic.BaseModel):
     docker: typing.Optional[CResourceManagerDocker] = pydantic.Field(
         None,
         description="Configuration for the Docker-like backend. In use when config.backend is set to \"docker\""
+    )
+
+
+class COptimizer(pydantic.BaseModel):
+    class Config:
+        extra = "forbid"
+
+    disable: typing.Optional[bool] = pydantic.Field(
+        None,
+        description="(deprecated) Whether to disable the optimizer"
+    )
+
+    exploitChance: typing.Optional[float] = pydantic.Field(
+        None,
+        description="(deprecated)"
+    )
+
+    exploitTarget: typing.Optional[float] = pydantic.Field(
+        None,
+        description="(deprecated)"
+    )
+
+    exploitTargetLow: typing.Optional[float] = pydantic.Field(
+        None,
+        description="(deprecated)"
+    )
+
+    exploitTargetHigh: typing.Optional[float] = pydantic.Field(
+        None,
+        description="(deprecated)"
     )
 
 
@@ -548,18 +588,25 @@ class CWorkflowAttributes(pydantic.BaseModel):
         description="Settings for the memoization subsystem of the runtime"
     )
 
-    @pydantic.root_validator(pre=True)
-    def val_hide_keys(cls, model: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
-        if not isinstance(model, typing.Dict):
-            return model
+    isMigratable: typing.Optional[bool] = pydantic.Field(
+        None,
+        description="(deprecated) Whether this component can migrate to later stages"
+    )
 
-        for key in ["isMigratable", "isMigrated", "optimizer", "isRepeat", "name"]:
-            try:
-                del model[key]
-            except KeyError:
-                pass
+    isMigrated: typing.Optional[bool] = pydantic.Field(
+        None,
+        description="(deprecated) Whether this component has migrated from earlier stages"
+    )
 
-        return model
+    isRepeat: typing.Optional[bool] = pydantic.Field(
+        None,
+        description="(deprecated) Whether this component repeats - tracked internally"
+    )
+
+    optimizer: typing.Optional[COptimizer] = pydantic.Field(
+        None,
+        description="(deprecated) Settings for the optimization of repeat intervals for repeating components"
+    )
 
 
 class CResourceRequest(pydantic.BaseModel):
@@ -813,6 +860,11 @@ class Component(pydantic.BaseModel):
     resourceManager: CResourceManager = pydantic.Field(
         default_factory=CResourceManager,
         description="Settings for the backend to use for executing Tasks of this Component"
+    )
+
+    variables: typing.Dict[str, typing.Union[None, str, float, int, bool]] = pydantic.Field(
+        {},
+        description="Variables that the component can use internally, cannot be set by caller of Component"
     )
 
 

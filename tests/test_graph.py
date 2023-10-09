@@ -5,6 +5,8 @@
 
 from __future__ import print_function
 
+import typing
+
 import pytest
 
 from collections import OrderedDict
@@ -21,6 +23,10 @@ import os
 import yaml
 
 from . import utils
+
+from .test_dsl import (
+    dsl_one_workflow_one_component_one_step_no_datareferences,
+)
 
 
 def test_graph_from_dictionaries():
@@ -666,36 +672,24 @@ def test_graph_generate_new_dsl_workflow_double_reference_workflow_parameter():
     }
 
 
-def test_graph_returns_actual_dsl2(output_dir: str):
-    dsl = experiment.model.frontends.dsl.Namespace(**yaml.safe_load("""
-        entrypoint:
-          entry-instance: main
-          execute:
-          - target: <entry-instance>
-        workflows:
-        - signature:
-            name: main
-            parameters: []
-          steps:
-            hello: echo
-          execute:
-          - target: <hello>
-            args:
-              message: hello world
-        components:
-        - signature:
-            name: echo
-            parameters:
-            - name: message
-          command:
-            executable: echo
-            arguments: "%(message)s"
-            environment:
-              hello: world
-        """)).dict(by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True)
+def test_graph_returns_actual_dsl2(
+    output_dir: str,
+    dsl_one_workflow_one_component_one_step_no_datareferences: typing.Dict[str, typing.Any],
+):
+    dsl = experiment.model.frontends.dsl.Namespace(**dsl_one_workflow_one_component_one_step_no_datareferences)
+
+    # VV: command.environment poitns to the "environment" parameter. Resolve it fully here to double check that
+    # the DSL we get out of the workflowGraph is the actual DSL we stored in the file and not the hallucinated one
+    dsl.components[0].command.environment = [
+        p for p in dsl.components[0].signature.parameters if p.name == "environment"
+    ][0].default
+
+    dsl_raw = dsl.dict(
+        by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True
+    )
 
     pkg_dir = os.path.join(output_dir, "workflow.package")
-    utils.populate_files(pkg_dir, {"conf/dsl.yaml": yaml.safe_dump(dsl)})
+    utils.populate_files(pkg_dir, {"conf/dsl.yaml": yaml.safe_dump(dsl_raw)})
 
     instance_dir = os.path.join(output_dir, "package.instance")
     os.makedirs(instance_dir)
@@ -703,9 +697,12 @@ def test_graph_returns_actual_dsl2(output_dir: str):
 
     assert isValid
 
-    dsl = compExperiment.experimentGraph.to_dsl()
+    dsl_loaded = compExperiment.experimentGraph.to_dsl()
 
-    dsl = experiment.model.frontends.dsl.Namespace(**dsl)
+    dsl = experiment.model.frontends.dsl.Namespace(**dsl_loaded)
 
     # VV: The hallucinated environment would have been "%(env-vars)s"
-    assert dsl.components[0].command.environment == {"hello": "world"}
+    assert dsl.components[0].command.environment == {
+        "DEFAULTS": "PATH:LD_LIBRARY_PATH",
+        "AN_ENV_VAR": "ITS_VALUE",
+    }

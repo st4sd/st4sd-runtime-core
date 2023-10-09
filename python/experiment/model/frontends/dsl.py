@@ -3,7 +3,7 @@
 # Author(s): Vassilis Vassiliadis, Michael Johnston
 
 
-"""This is Work In Progress
+"""Support for DSL 2.0 IS A WORK IN PROGRESS - the model and validation/auto-generation rules may change.
 
 The DSL v2.0.0 is evolving, below we describe the schema v0.1.0 with hints about v0.2.0 (i.e.
 support for using more than 1 namespaces).
@@ -21,24 +21,30 @@ arguments can be literals, parameters of the parent workflow, or outputs of othe
 direct, or indirect, cycles.
 
 - Reference a step like so: <stepName>
-- Reference a step that is nested in a workflow like this: <parentWorkflow/stepName> or "<parentWorkflow>"/stepName
+- Reference a step that is nested in a workflow like this:
+  - <parentWorkflow/stepName> or
+  - "<parentWorkflow>"/stepName
+  - <parentWorkflow>/stepName
+  - <"%(parameterContainingOutputReference)s">stepName
 - Reference a parameter: %(like-this)s
 - Reference an output of a step: <stepName/optional/path> or "<stepName>"/optional/path
   - Outputs of steps can also have reference methods: <stepName/optional/path>:ref
-  - other reference methods are:
+  - supported reference methods are:
+    - :ref
     - :output
     - :copy
     - :link
+    - :extract
 
 Instantiated Blueprints have outputs:
   Workflow: the outputs are the steps
   Component: the outputs are files (and streams) that the components produce
 
 
-
 The definition of Namespace is:
 
 entrypoint: # describes how to run this namespace
+  # TODO: Rename this field as entryInstance
   entry-instance: the-identifier-of-a-class
   execute: # the same as workflow.execute with the difference that there is always 1 step
     # and the name of the step is always <entry-instance>
@@ -105,6 +111,7 @@ import experiment.model.errors
 ParameterPattern = experiment.model.frontends.flowir.FlowIR.VariablePattern
 ParameterValueType = typing.Optional[typing.Union[str, float, int, typing.Dict[str, typing.Any]]]
 
+SignatureNamePattern = r"(stage(?P<stage>([0-9]+))\.)?(?P<name>([A-Za-z0-9._-]*[A-Za-z_-]+))"
 StepNamePattern = r"[.A-Za-z0-9_-]+"
 # VV: A reference may have a prefix of N step names and a suffix of M paths each separated with a "/"
 # N must be greater or equal to 1 and M must be greater or equal to 0
@@ -224,7 +231,8 @@ class Signature(pydantic.BaseModel):
     name: str = pydantic.Field(
         description="The name of the blueprint, must be unique in the parent namespace",
         min_length=1,
-        regex=r"[A-Za-z0-9\._-]+"
+        # VV: Names cannot end in digits - FlowIR has a special meaning for digits at the end of component names
+        regex=SignatureNamePattern
     )
     parameters: typing.List[Parameter] = pydantic.Field(
         description="The collection of the parameters to the blueprint"
@@ -713,7 +721,7 @@ def _replace_many_parameter_references(
 def replace_parameter_references(
         value: ParameterValueType,
         field: typing.List[str],
-        scope_instances: typing.Dict[typing.Tuple[str], "ScopeBook.ScopeEntry"],
+        all_scopes: typing.Dict[typing.Tuple[str], "ScopeStack.Scope"],
         location: typing.Iterable[str],
 ) -> ParameterValueType:
     """Resolves a value given the location of the owner blueprint instance and a book of all scopes
@@ -722,7 +730,7 @@ def replace_parameter_references(
 
         value:
             The parameter value
-        scope_instances:
+        all_scopes:
             A collection of all known scopes
         field:
             the path to the field whose value is being handled
@@ -744,7 +752,7 @@ def replace_parameter_references(
 
     current_location = list(location)
     while should_resolve_more(value):
-        current_scope = scope_instances[tuple(current_location[:-1])]
+        current_scope = all_scopes[tuple(current_location[:-1])]
         value = _replace_many_parameter_references(
             what=value,
             loc=current_location,
@@ -849,8 +857,11 @@ class Namespace(pydantic.BaseModel):
         raise KeyError(f"No blueprint with name {name}")
 
 
-class ScopeBook:
-    class ScopeEntry:
+class ScopeStack:
+    """A collection of all reachable Scopes starting from the Entrypoint of a Namespace"""
+    
+    class Scope:
+        """Describes how to instantiate a @blueprint at a certain @location with certain @parameters"""
         def __init__(
             self,
             location: typing.List[str],
@@ -869,7 +880,7 @@ class ScopeBook:
             bp_type = "workflows" if isinstance(self.blueprint, Workflow) else "components"
             return [bp_type, self.blueprint.signature.name]
 
-        def verify_parameters(self, caller_location: experiment.model.errors.DSLLocation) -> typing.List[Exception]:
+        def verify_parameters(self, caller_location: experiment.model.errors.DSLLocation):
             """Utility method to verify the parameters of a scope
 
              Args:
@@ -909,8 +920,8 @@ class ScopeBook:
                     self.parameters[name] = value
 
         def resolve_parameter_references_of_instance(
-            self: "ScopeBook.ScopeEntry",
-            scope_instances: typing.Dict[typing.Tuple[str], "ScopeBook.ScopeEntry"]
+            self: "ScopeStack.Scope",
+            all_scopes: typing.Dict[typing.Tuple[str], "ScopeStack.Scope"]
         ) -> typing.List[Exception]:
             errors: typing.List[Exception] = []
             for name, value in self.parameters.items():
@@ -919,7 +930,7 @@ class ScopeBook:
                         location=self.location,
                         value=value,
                         field=["signature", "parameters", name],
-                        scope_instances=scope_instances,
+                        all_scopes=all_scopes,
                     )
                 except ValueError as e:
                     errors.append(
@@ -932,8 +943,8 @@ class ScopeBook:
             return errors
 
         def resolve_output_references_of_instance(
-            self: "ScopeBook.ScopeEntry",
-            scope_instances: typing.Dict[typing.Tuple[str], "ScopeBook.ScopeEntry"],
+            self: "ScopeStack.Scope",
+            all_scopes: typing.Dict[typing.Tuple[str], "ScopeStack.Scope"],
             ensure_references_point_to_sibling_steps: bool,
         ) -> typing.List[Exception]:
             errors: typing.List[Exception] = []
@@ -942,7 +953,7 @@ class ScopeBook:
                     self.parameters[name] = self.replace_step_references(
                         value=value,
                         field=["signature", "parameters", name],
-                        scope_instances=scope_instances,
+                        all_scopes=all_scopes,
                         ensure_references_point_to_sibling_steps=ensure_references_point_to_sibling_steps,
                     )
                 except ValueError as e:
@@ -966,8 +977,8 @@ class ScopeBook:
             return errors
 
         def resolve_legacy_data_references(
-            self: "ScopeBook.ScopeEntry",
-            scope_instances: typing.Dict[typing.Tuple[str], "ScopeBook.ScopeEntry"],
+            self: "ScopeStack.Scope",
+            all_scopes: typing.Dict[typing.Tuple[str], "ScopeStack.Scope"],
         ) -> typing.List[Exception]:
             errors: typing.List[Exception] = []
             for name, value in self.parameters.items():
@@ -1020,7 +1031,7 @@ class ScopeBook:
                 self,
                 value: ParameterValueType,
                 field: typing.List[str],
-                scope_instances: typing.Dict[typing.Tuple[str], "ScopeBook.ScopeEntry"],
+                all_scopes: typing.Dict[typing.Tuple[str], "ScopeStack.Scope"],
                 ensure_references_point_to_sibling_steps: bool = True,
         ) -> ParameterValueType:
             """Rewrites all references to steps in a value to their absolute form
@@ -1028,7 +1039,7 @@ class ScopeBook:
             Args:
                 value:
                     The parameter value
-                scope_instances:
+                all_scopes:
                     A collection of all known scopes
                 field:
                     the path to the field whose value is being handled
@@ -1053,7 +1064,7 @@ class ScopeBook:
                 parent_workflow_name = uid_parent[-1] if len(uid_parent) > 0 else "**missing**"
 
                 try:
-                    parent_scope = scope_instances[uid_parent]
+                    parent_scope = all_scopes[uid_parent]
                 except KeyError:
                     raise experiment.model.errors.DSLInvalidFieldError(
                         location=["workflows", parent_workflow_name],
@@ -1105,14 +1116,15 @@ class ScopeBook:
             return value
 
     def __init__(self):
-        self.scopes: typing.List[ScopeBook.ScopeEntry] = []
+        # VV: The current collection of Scopes. The scope at the end of the list is the "current" scope.
+        self.stack: typing.List[ScopeStack.Scope] = []
 
         # VV: Keys are "locations" of blueprint instances i.e. ["entry-instance", "parentWorkflow", "component"]
         # think of this as the full path an instance of a blueprint starting from the root of the namespace.
         # The root of the namespace is what the entrypoint invokes, it's name is always `entry-instance`.
         # The values are the ScopeEntries which are effectively instances of a Blueprint i.e.
         # The instance name, definition, and parameters of a Blueprint
-        self.instances: typing.Dict[typing.Tuple[str], ScopeBook.ScopeEntry] = {}
+        self.instances: typing.Dict[typing.Tuple[str], ScopeStack.Scope] = {}
 
     def enter(
             self,
@@ -1129,7 +1141,7 @@ class ScopeBook:
         if uid in self.instances:
             errors.append(ValueError(f"Node has already been visited", location))
 
-        scope_entry = ScopeBook.ScopeEntry(location=location, parameters=parameters, blueprint=blueprint)
+        scope_entry = ScopeStack.Scope(location=location, parameters=parameters, blueprint=blueprint)
 
         for p in blueprint.signature.parameters:
             if p.name in parameters:
@@ -1153,22 +1165,22 @@ class ScopeBook:
 
         self.instances[uid] = scope_entry
 
-        self.scopes.append(scope_entry)
+        self.stack.append(scope_entry)
 
         return scope_entry
 
     def exit(self):
-        self.scopes.pop(-1)
+        self.stack.pop(-1)
 
-    def current_scope(self) -> "ScopeBook.ScopeEntry":
-        return self.scopes[-1]
+    def current_scope(self) -> "ScopeStack.Scope":
+        return self.stack[-1]
 
     def depth(self) -> int:
-        return len(self.scopes)
+        return len(self.stack)
 
 
     def get_location(self) -> typing.List[str]:
-        return [s.name for s in self.scopes]
+        return [s.name for s in self.stack]
 
 
     def get_parent_parameter_names(self) -> typing.List[str]:
@@ -1179,11 +1191,11 @@ class ScopeBook:
 
         return []
 
-    def _seed_scope_instances(self, namespace: Namespace) -> typing.List[Exception]:
+    def _seed_all_scopes(self, namespace: Namespace) -> typing.List[Exception]:
         """Utility method to visit all Workflows and Components which are reachable from the Entrypoint and seed
-        the ScopeBook with 1 scope for each visited blueprint
+        the ScopeStack with 1 scope for each visited blueprint
 
-        The utility method updates the `scope_instances` ivar.
+        The utility method updates the `all_scopes` ivar.
 
         Args:
             namespace:
@@ -1197,10 +1209,10 @@ class ScopeBook:
             Enter = "enter"
             Exit = "exit"
 
-        remaining_scopes: typing.List[typing.Tuple[Action, ScopeBook.ScopeEntry]] = [
+        remaining_scopes: typing.List[typing.Tuple[Action, ScopeStack.Scope]] = [
             (
                 Action.Enter,
-                ScopeBook.ScopeEntry(
+                ScopeStack.Scope(
                     location=["entry-instance"],
                     blueprint=namespace.get_blueprint(namespace.entrypoint.entryInstance),
                     parameters=namespace.entrypoint.execute[0].args,
@@ -1277,7 +1289,7 @@ class ScopeBook:
 
                     parameters = copy.deepcopy(execute.args or {})
 
-                    new_scope = ScopeBook.ScopeEntry(
+                    new_scope = ScopeStack.Scope(
                         location=scope.location + [execute.get_target()],
                         parameters=parameters,
                         blueprint=blueprint,
@@ -1298,10 +1310,10 @@ class ScopeBook:
         return errors
 
     @classmethod
-    def from_namespace(cls, namespace: Namespace) -> "ScopeBook":
-        scope_book = cls()
+    def from_namespace(cls, namespace: Namespace) -> "ScopeStack":
+        scope_stack = cls()
 
-        errors = scope_book._seed_scope_instances(namespace=namespace)
+        errors = scope_stack._seed_all_scopes(namespace=namespace)
 
         if errors:
             exc = experiment.model.errors.DSLInvalidError.from_errors(errors)
@@ -1312,8 +1324,8 @@ class ScopeBook:
         # if any field other than `command.environment` references a dictionary record an error
 
         def resolve_scope(
-            scope: ScopeBook.ScopeEntry,
-            scope_book: ScopeBook = scope_book,
+            scope: ScopeStack.Scope,
+            scope_stack: ScopeStack = scope_stack,
         ):
             scope_errors = []
             # VV: Workflows can use the arguments of their step Workflows to propagate the outputs of their children
@@ -1324,41 +1336,41 @@ class ScopeBook:
             # After we resolve parameters, we can go ahead and resolve the OutputReferences again without performing
             # the above sibling-step check.
             errors.extend(scope.resolve_output_references_of_instance(
-                    scope_instances=scope_book.instances,
+                    all_scopes=scope_stack.instances,
                     ensure_references_point_to_sibling_steps=True,
                 )
             )
-            scope_errors.extend(scope.resolve_parameter_references_of_instance(scope_instances=scope_book.instances))
-            scope_errors.extend(scope.resolve_legacy_data_references(scope_instances=scope_book.instances))
+            scope_errors.extend(scope.resolve_parameter_references_of_instance(all_scopes=scope_stack.instances))
+            scope_errors.extend(scope.resolve_legacy_data_references(all_scopes=scope_stack.instances))
             scope_errors.extend(scope.resolve_output_references_of_instance(
-                    scope_instances=scope_book.instances,
+                    all_scopes=scope_stack.instances,
                     ensure_references_point_to_sibling_steps=False,
                 )
             )
             return  scope_errors
 
-        for location, scope in scope_book.instances.items():
+        for location, scope in scope_stack.instances.items():
             if isinstance(scope.blueprint, Workflow):
-                errors.extend(resolve_scope(scope=scope, scope_book=scope_book))
+                errors.extend(resolve_scope(scope=scope, scope_stack=scope_stack))
 
-        for location, scope in scope_book.instances.items():
+        for location, scope in scope_stack.instances.items():
             if isinstance(scope.blueprint, Component):
-                errors.extend(resolve_scope(scope=scope, scope_book=scope_book))
+                errors.extend(resolve_scope(scope=scope, scope_stack=scope_stack))
 
-        # for location, scope in scope_book.instances.items():
+        # for location, scope in scope_stack.instances.items():
         #     print(type(scope.blueprint).__name__, scope.location, "parameters", scope.parameters)
 
         if errors:
             raise experiment.model.errors.DSLInvalidError.from_errors(errors)
 
-        return scope_book
+        return scope_stack
 
 
 class ComponentFlowIR:
     def __init__(
         self,
         environment: typing.Optional[typing.Dict[str, typing.Any]],
-        scope: ScopeBook.ScopeEntry,
+        scope: ScopeStack.Scope,
         errors: typing.List[Exception],
     ):
         self.environment = environment
@@ -1573,12 +1585,12 @@ class ComponentFlowIR:
 
                 where[self.location[-1]] = new_value
 
-            def replace_parameter_references(self, scope: ScopeBook.ScopeEntry, flowir: typing.Dict[str, typing.Any]):
+            def replace_parameter_references(self, scope: ScopeStack.Scope, flowir: typing.Dict[str, typing.Any]):
                 new_value = replace_parameter_references(
                     self.value,
                     field=self.location,
                     location=scope.location + ["inner field"],
-                    scope_instances={
+                    all_scopes={
                         tuple(scope.location): scope
                     }
                 )
@@ -1635,7 +1647,10 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
     2. verify that all reachable nodes reference a blueprint that actually exists
     3. build a mapping of unique node identifiers to the blueprint that they reference
     4. after visiting all nodes if there're any errors raise an exception and stop, else:
-    5. revisit all `Component` nodes (order doesn't matter) and WIP
+    5. revisit all Component nodes (order doesn't matter) and:
+       - generate unique names for components
+       - generate unique names for environments (if 2 environments contain identical env-vars they're the same)
+
 
     Args:
         namespace: the namespace to convert
@@ -1643,7 +1658,7 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
     Returns:
         A FlowIRConcrete instance
     """
-    scopes =  ScopeBook.from_namespace(namespace)
+    scopes =  ScopeStack.from_namespace(namespace)
 
     components: typing.Dict[typing.Tuple[str], ComponentFlowIR] = {}
     errors = []
@@ -1652,7 +1667,7 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
         if isinstance(scope.blueprint, Component):
             comp_flowir = digest_dsl_component(
                 scope=scope,
-                scope_instances=scopes.instances
+                all_scopes=scopes.instances
             )
             errors.extend(comp_flowir.errors)
             components[tuple(scope.location)] = comp_flowir
@@ -1662,6 +1677,8 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
 
     component_names: typing.Dict[str, int] = {}
     uid_to_name: typing.Dict[typing.Tuple[str], typing.Tuple[int, str]] = {}
+
+    pattern_name = re.compile(SignatureNamePattern)
 
     for _, comp in components.items():
         assert isinstance(comp.scope.blueprint, Component)
@@ -1694,7 +1711,7 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
 
         return tuple(hash)
 
-    known_environments: typing[typing.Tuple[typing.Tuple[str, str]], str] = {}
+    known_environments: typing.Dict[typing.Tuple[typing.Tuple[str, str]], str] = {}
 
     for _, comp in components.items():
         comp.resolve_parameter_references()
@@ -1721,7 +1738,6 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
     for _, comp in components.items():
         comp.convert_outputreferences_to_datareferences(uid_to_name)
 
-
     # VV: At this point components are ready, start plopping them in the flowir
     for _, comp in components.items():
         complete.add_component(comp.flowir)
@@ -1735,8 +1751,8 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
 
 
 def digest_dsl_component(
-    scope: ScopeBook.ScopeEntry,
-    scope_instances: typing.Dict[typing.Tuple[str], ScopeBook.ScopeEntry],
+    scope: ScopeStack.Scope,
+    all_scopes: typing.Dict[typing.Tuple[str], ScopeStack.Scope],
 ) -> ComponentFlowIR:
     """Utility method to generate information that the caller can use to put together a FlowIRConcrete instance
 
@@ -1758,7 +1774,7 @@ def digest_dsl_component(
     Args:
         scope:
             the component blueprint, its parameters to instantiate it, and its unique location (uid)
-        scope_instances:
+        all_scopes:
             all other instantiated blueprints. This is a key: value dictionary, where each key is the location of a
             scope and the value is the scope of the instantiated blueprint. The scopes may point to either Workflows
             or Components.

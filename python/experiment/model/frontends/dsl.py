@@ -1683,7 +1683,7 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
             components[tuple(scope.location)] = comp_flowir
 
     if errors:
-        raise experiment.model.errors.FlowIRConfigurationErrors(errors=errors)
+        raise experiment.model.errors.DSLInvalidError.from_errors(errors)
 
     component_names: typing.Dict[str, int] = {}
     uid_to_name: typing.Dict[typing.Tuple[str], typing.Tuple[int, str]] = {}

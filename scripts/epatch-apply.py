@@ -647,7 +647,7 @@ if __name__ == "__main__":
         if isinstance(experimentDir, experiment.model.storage.ExperimentPackage):
             # VV: TODO Do we want to rewrite the manifest so that we *always* copy application-dependencies?
             target_package: experiment.model.storage.ExperimentPackage = experimentDir
-            target_package.expandPackageToDirectory(patchedExperimentDir)
+            target_package.expandPackageToDirectory(patchedExperimentDir, experimentDir.configuration.file_format)
 
             patched_package = experiment.model.storage.ExperimentPackage.packageFromLocation(
                 patchedExperimentDir, platform=target_package.configuration.platform_name,

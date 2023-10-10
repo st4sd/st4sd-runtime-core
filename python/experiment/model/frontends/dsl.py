@@ -1727,10 +1727,7 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
 
     for location, scope in scopes.scopes.items():
         if isinstance(scope.blueprint, Component):
-            comp_flowir = digest_dsl_component(
-                scope=scope,
-                all_scopes=scopes.scopes
-            )
+            comp_flowir = digest_dsl_component(scope=scope)
             errors.extend(comp_flowir.errors)
             components[tuple(scope.location)] = comp_flowir
 
@@ -1829,7 +1826,6 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
 
 def digest_dsl_component(
     scope: ScopeStack.Scope,
-    all_scopes: typing.Dict[typing.Tuple[str], ScopeStack.Scope],
 ) -> ComponentFlowIR:
     """Utility method to generate information that the caller can use to put together a FlowIRConcrete instance
 
@@ -1851,10 +1847,6 @@ def digest_dsl_component(
     Args:
         scope:
             the component blueprint, its parameters to instantiate it, and its unique location (uid)
-        all_scopes:
-            all other instantiated blueprints. This is a key: value dictionary, where each key is the location of a
-            scope and the value is the scope of the instantiated blueprint. The scopes may point to either Workflows
-            or Components.
 
     Returns:
         Information necessary to produce FlowIR from a Component in the form of ComponentFlowIR and a collection of

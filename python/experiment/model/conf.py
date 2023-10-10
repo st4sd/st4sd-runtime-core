@@ -14,6 +14,7 @@ import copy
 import difflib
 import logging
 import os
+import pydantic.typing
 import re
 import traceback
 from typing import (TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type,
@@ -203,6 +204,7 @@ class FlowIRExperimentConfiguration:
         validate: bool = True,
         config_patches: Optional[Dict[int, List[str]]] = None,  # VV: deprecate config_patches
         expand_references: bool = True,
+        file_format: Optional[pydantic.typing.Literal["flowir", "dsl"]] = None,
         **kwargs
     ):
         """Initializes and then optionally validates a package/Instance configuration.
@@ -216,41 +218,55 @@ class FlowIRExperimentConfiguration:
         5. Validate
 
         Args:
-            platform: Name of platform (defaults to `default` which is mapped to `experiment.conf`)
-            path: Path to workflow definition. Can be a directory, a file, or None if workflow definition
+            platform:
+                Name of platform (defaults to `default` which is mapped to `experiment.conf`)
+            path:
+                Path to workflow definition. Can be a directory, a file, or None if workflow definition
                 is stored entirely in memory
-            variable_files: Instance specific variable file(s). If multiple files are provided then they are layered
+            variable_files:
+                Instance specific variable file(s). If multiple files are provided then they are layered
                 starting from the first and working towards the last. This means that the value of a variable that
                  exists in multiple layers will be the one that the last layer defines.
-            system_vars: A dictionary of environment variables.
+            system_vars:
+                A dictionary of environment variables.
                 These variables are added to every environment - even environments with no vars/name
                 The purpose of system vars is for the experiment controller to be able to set
                 non-application specific variables
-            config_patches: A dictionary whose keys are stage indexes and whose values are a list
+            config_patches:
+                A dictionary whose keys are stage indexes and whose values are a list
                 of configuration files. These configuration files will be layered on-top of the
                 default configuration file for stage index. For example, allowing addition of new
                 components, or dynamic option reconfig.
-            is_instance: Indicates whether to load the Instance flavour of the Experiment instead of the Package one
-            createInstanceFiles: If set to True will auto-generate instance files provided that they do not
+            is_instance:
+                Indicates whether to load the Instance flavour of the Experiment instead of the Package one
+            createInstanceFiles:
+                If set to True will auto-generate instance files provided that they do not
                 already exist. Set updateInstanceFiles to True too to update existing files.
-            concrete: The FlowIRConcrete object which holds the FlowIR configuration, if it's none then
+            concrete:
+                The FlowIRConcrete object which holds the FlowIR configuration, if it's none then
                  the class will load the configuration from conf/flowir_package.yaml for Packages and
                  conf/flowir_instance.yaml for Instances
-            primitive: If true will not perform replication, otherwise will replicate components following the
+            primitive:
+                If true will not perform replication, otherwise will replicate components following the
                 workflowAttributes.replicate rules
-            updateInstanceFiles: Set to true to update instance files if they already exist
-            variable_substitute: Whether to perform variable substitution, optional for a primitive graph
+            updateInstanceFiles:
+                Set to true to update instance files if they already exist
+            variable_substitute:
+                Whether to perform variable substitution, optional for a primitive graph
                 but required for a replicated one
-            manifest: The manifest is a dictionary, with targetFolder: sourceFolder entries. Each
+            manifest:
+                The manifest is a dictionary, with targetFolder: sourceFolder entries. Each
                 sourceFolder will be copied or linked to populate the respective targetFolder. Source folders can be
                 absolute paths, or paths relative to the path of the FlowIR YAML file. SourceFolders may also be
                 suffixed with :copy or :link to control whether targetFolder will be copied or linked to sourceFolder
                 (default is copy). TargetFolders are interpreted as relative paths under the instance directory. They
                 may also be the resulting folder name of some applicationDependency. They may include a path-separator
                 (.e.g /) but must not be absolute paths.
-            validate: When True this method will raise exception if configuration is invalid or missing
-            expand_references: Whether to expand component references to their absolute string representation
-
+            validate:
+                When True this method will raise exception if configuration is invalid or missing
+                expand_references: Whether to expand component references to their absolute string representation
+            file_format:
+                The file format of a package which consists of a single file. Defaults to "flowir"
         Raises:
             experiment.errors.ExperimentInvalidConfigurationError:  If the configuration fails the validation checks
             experiments.errors.ExperimentMissingConfigurationError: If configuration does not exist and validate is True
@@ -265,7 +281,7 @@ class FlowIRExperimentConfiguration:
         variable_files = list(set(variable_files or []))
 
         out_errors = []
-
+        self.file_format = file_format
         self._is_instance = is_instance
         self._manifest = FlowIRExperimentConfiguration._NoFlowIR  # type: Union[object, Manifest]
 
@@ -283,12 +299,12 @@ class FlowIRExperimentConfiguration:
             # VV: This configuration is stored in Memory
             self._location = "in-memory://"
             self._conf_dir = self._location
-            self._flowir_file_path = self._location
+            self._dsl_file_path = self._location
             self._is_package = None
         elif os.path.isfile(path):
             self._location = os.path.dirname(os.path.abspath(path))
             self._conf_dir = self._location
-            self._flowir_file_path = path
+            self._dsl_file_path = path
             self._is_package = False
         else:
             # NOTE: This is for packages which derive from an existing directory
@@ -296,9 +312,9 @@ class FlowIRExperimentConfiguration:
             self._conf_dir = os.path.join(self._location, 'conf')
             self._path_package_yaml = os.path.join(self._conf_dir, 'flowir_package.yaml')
             if is_instance is False:
-                self._flowir_file_path = self._path_package_yaml
+                self._dsl_file_path = self._path_package_yaml
             else:
-                self._flowir_file_path = os.path.join(self._conf_dir, 'flowir_instance.yaml')
+                self._dsl_file_path = os.path.join(self._conf_dir, 'flowir_instance.yaml')
             self._is_package = True
 
         self._create_instance_files = createInstanceFiles
@@ -338,7 +354,7 @@ class FlowIRExperimentConfiguration:
                 if self.isExperimentPackageDirectory:
                     path = self._path_to_main_file(path, is_instance)
                 else:
-                    path = self._flowir_file_path
+                    path = self._dsl_file_path
                 # VV: This method also populates self._original_flowir_0
                 concrete = self._load_concrete(path, self._platform, out_errors)
             else:
@@ -682,10 +698,10 @@ class FlowIRExperimentConfiguration:
         if self._is_package:
             return self._location
         else:
-            return self._flowir_file_path
+            return self._dsl_file_path
 
     def flowir_path(self):
-        return self._flowir_file_path
+        return self._dsl_file_path
 
     def get_application_dependencies(self):
         return self._concrete.get_application_dependencies()
@@ -1437,6 +1453,7 @@ class DSLExperimentConfiguration(FlowIRExperimentConfiguration):
             config_patches=config_patches,
             expand_references=expand_references,
             concrete=concrete,
+            file_format="dsl",
             **kwargs
         )
 

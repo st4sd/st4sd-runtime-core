@@ -535,7 +535,41 @@ def dsl_band_gap_pm3_gamess_us() -> typing.Dict[str, typing.Any]:
     """)
 
 
+@pytest.fixture()
+def dsl_no_workflow() -> typing.Dict[str, typing.Any]:
+    return yaml.safe_load("""
+    entrypoint:
+      entry-instance: print
+      execute:
+      - target: "<entry-instance>"
+        args:
+          message: Hello world
+    components:
+    - signature:
+        name: print
+        parameters:
+          - name: message
+      command:
+        executable: echo
+        arguments: "%(message)s"
+    """)
+
+
+def test_parse_dsl_no_workflow(dsl_no_workflow: typing.Dict[str, typing.Any]):
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl_no_workflow)
+
+    print(yaml.safe_dump(namespace.dict(
+        by_alias=True, exclude_unset=True, exclude_defaults=True, exclude_none=True), indent=2))
+
+    print("-----------")
+    flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
+    print(yaml.safe_dump(flowir.raw(), indent=2))
+
+    assert flowir.validate() == []
+
+
 def test_parse_hallucinated_simple_dsl2(simple_flowir: experiment.model.frontends.flowir.DictFlowIR):
+    import experiment.model.errors
     graph = experiment.model.graph.WorkflowGraph.graphFromFlowIR(simple_flowir, {})
 
     dsl = graph.to_dsl()
@@ -548,6 +582,25 @@ def test_parse_hallucinated_simple_dsl2(simple_flowir: experiment.model.frontend
     print("-----------")
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
     print(yaml.safe_dump(flowir.raw(), indent=2))
+
+    # VV: We don't support manifests yet
+    errors = flowir.validate()
+    assert len(errors) == 2
+
+    err_unknown_reference = [x for x in errors
+                             if isinstance(x, experiment.model.errors.FlowIRUnknownReferenceInArguments)][0]
+    err_unknown_component = [x for x in errors
+                             if isinstance(x, experiment.model.errors.FlowIRReferenceToUnknownComponent)][0]
+
+    assert err_unknown_reference.ref_unknown == "dataset:ref"
+    assert err_unknown_reference.component == "hello"
+    assert err_unknown_reference.stage == 0
+
+    # VV: flowir also tries to see if there's a `dataset` component the developer is trying to reference
+    assert err_unknown_component.references == ["stage0.dataset"]
+    assert err_unknown_component.component == "hello"
+    assert err_unknown_component.stage == 0
+
 
 
 def test_parse_band_gap_pm3_gamess_us(dsl_band_gap_pm3_gamess_us: typing.Dict[str, typing.Any]):
@@ -576,6 +629,8 @@ def test_parse_band_gap_pm3_gamess_us(dsl_band_gap_pm3_gamess_us: typing.Dict[st
         'stage1.ExtractEnergies',
         'stage1.GeometryOptimisation'
     ])
+
+    assert len(flowir.validate()) == 0
 
 
 @pytest.mark.parametrize("input_outputs", [
@@ -662,7 +717,6 @@ def test_dsl2_single_workflow_single_component_single_step_no_datareferences(fix
     }
 
     errors = flowir.validate()
-
     assert len(errors) == 0
 
 
@@ -724,7 +778,6 @@ def test_dsl2_single_workflow_one_component_two_steps_no_edges(
     }
 
     errors = flowir.validate()
-
     assert len(errors) == 0
 
 

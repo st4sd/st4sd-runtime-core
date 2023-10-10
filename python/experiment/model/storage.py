@@ -8,6 +8,7 @@
 from __future__ import annotations
 from __future__ import print_function
 
+import pydantic.typing
 from abc import ABCMeta, abstractmethod, abstractproperty
 import six
 
@@ -390,8 +391,8 @@ class ExperimentPackage(StorageStructurePathResolver):
 
     def __init__(
             self,
-            flow_ir_conf,  # type: experiment.model.conf.FlowIRExperimentConfiguration
-            manifest  # type: Optional[DictManifest]
+            flow_ir_conf: experiment.model.conf.FlowIRExperimentConfiguration,
+            manifest: Optional[DictManifest]
     ):
         """
         A package consists of a FlowIRConfiguration object and a manifest
@@ -485,8 +486,7 @@ class ExperimentPackage(StorageStructurePathResolver):
         return self.flow_ir_conf
 
     @property
-    def location(self):
-        # type: () -> str
+    def location(self) -> str:
         '''Returns the receivers location
 
         This is the "main" directory of the workflow storage
@@ -534,8 +534,11 @@ class ExperimentPackage(StorageStructurePathResolver):
 
         pass
 
-    def expandPackageToDirectory(self, targetPath):
-        # type: (str) -> ()
+    def expandPackageToDirectory(
+            self,
+            targetPath: str,
+            file_format: Optional[pydantic.typing.Literal["flowir", "dsl"]]  = None
+    ):
 
         """Expands the contents of the package to a new directory
 
@@ -543,8 +546,11 @@ class ExperimentPackage(StorageStructurePathResolver):
 
         If ExperimentPackage is not created by a FlowIR YAML file this method uses shutil.copytree
 
-        Arguments:
-          targetPath(str): Path of the instance directory
+        Args:
+            targetPath:
+                Path of the instance directory
+            file_format:
+                The file format of a package which consists of a single file. Defaults to "flowir"
 
         """
 
@@ -611,8 +617,10 @@ class ExperimentPackage(StorageStructurePathResolver):
                     # VV: It's OK for the conf folder to already exist, it could have commonly used pipeline definitions
                     # in it which the flowir we're copying into the conf dir $imports
                     os.makedirs(conf_dir)
-
-                shutil.copyfile(path, os.path.join(conf_dir, "flowir_package.yaml"))
+                if file_format == "dsl":
+                    shutil.copyfile(path, os.path.join(conf_dir, "dsl.yaml"))
+                else:
+                    shutil.copyfile(path, os.path.join(conf_dir, "flowir_package.yaml"))
             except OSError as e:
                 raise_with_traceback(experiment.model.errors.PackageCreateError(e, targetPath, path))
 
@@ -980,7 +988,7 @@ class ExperimentInstanceDirectory(StorageStructurePathResolver):
         shadowDir = ExperimentShadowDirectory.temporaryShadow(uid_name)
 
         try:
-            package.expandPackageToDirectory(instancePath)
+            package.expandPackageToDirectory(instancePath, package.configuration.file_format)
         except Exception as data:
             raise experiment.model.errors.InstanceCreateError(data, location=instancePath)
 

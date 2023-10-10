@@ -195,6 +195,52 @@ class OutputReference:
 
         return from_location
 
+    def __str__(self):
+        return self.to_str()
+
+    def split(
+        self,
+        scopes: typing.Iterable[typing.Tuple[str]],
+    ) -> typing.Tuple[
+        typing.Tuple[str],
+        typing.Optional[str],
+    ]:
+        """Utility method to infer the partition of an OutputReference location into stepName and fileRef
+
+        Args:
+            scopes:
+                An iterable with scope locations
+
+        Returns:
+            A tuple whose first item is the location of the producer component and the second is the path reference
+        """
+        best = None
+        largest_overlap = 0
+
+        for other_loc in scopes:
+            overlap = 0
+            if len(self.location) < len(other_loc):
+                continue
+
+            for i in range(len(other_loc)):
+                if other_loc[i] != self.location[i]:
+                    break
+                overlap += 1
+
+            if overlap > largest_overlap:
+                best = other_loc
+                largest_overlap = overlap
+
+        if best:
+            if len(best) == len(self.location):
+                fileref = None
+            else:
+                fileref = '/'.join(self.location[len(best):]).lstrip('/')
+
+            return best, fileref
+
+        raise ValueError("Cannot split the location of OutputReference")
+
 
 class Parameter(pydantic.BaseModel):
     class Config:
@@ -285,15 +331,13 @@ class Workflow(pydantic.BaseModel):
         description="The Signature of the Workflow blueprint"
     )
 
-    steps: typing.Optional[typing.Dict[str, str]] = pydantic.Field(
-        None,
+    steps: typing.Dict[str, pydantic.constr(regex=SignatureNamePattern)] = pydantic.Field(
         description="Instantiated Blueprints that execute as steps of the parent workflow. "
                     "key: value pairs where the key is the name of the Instance and the value is the name "
                     "of the Blueprint from which to create the Instance."
     )
 
-    execute: typing.Optional[typing.List[ExecuteStep]] = pydantic.Field(
-        None,
+    execute: typing.List[ExecuteStep] = pydantic.Field(
         description="How to populate the parameters of Steps"
     )
 
@@ -1145,7 +1189,6 @@ class ScopeStack:
                         # VV: This works even if the OutputReference contains a reference to a parameter
                         ref = OutputReference.from_str(match.group(0))
                         if not ref.location or ref.location[0] not in sibling_steps:
-
                             raise experiment.model.errors.DSLInvalidFieldError(
                                 location=self.dsl_location() + (field or []),
                                 underlying_error=ValueError(
@@ -1160,8 +1203,12 @@ class ScopeStack:
                     ref = OutputReference.from_str(match.group(0))
                     partial += value[start:match.start()]
                     start = match.end()
-                    abs_ref = OutputReference(list(uid_parent) + ref.location, method=ref.method)
-                    partial += abs_ref.to_str()
+                    if ref.location and ref.location[0] != "entry-instance":
+                        abs_ref = OutputReference(list(uid_parent) + ref.location, method=ref.method)
+                        partial += abs_ref.to_str()
+                    else:
+                        # VV: This is already an absolute reference
+                        partial += ref.to_str()
                 partial += value[start:]
                 value = partial
 
@@ -1462,7 +1509,6 @@ class ComponentFlowIR:
     def discover_legacy_references(self) -> typing.Dict[str, typing.List[str]]:
         return self._get_refs_in_param(LegacyReferencePattern)
 
-
     def convert_outputreferences_to_datareferences(
         self,
         uid_to_name: typing.Dict[typing.Tuple[str], typing.Tuple[int, str]]
@@ -1556,45 +1602,18 @@ class ComponentFlowIR:
         #       the basename of the fileref. If there is no fileref in the OutputReference and it appears in the args
         #       then raise an exception
 
-        def infer_closest_match(comp_location: typing.List[str], from_ref: str) -> typing.Tuple[
-            typing.Tuple[str],
-            typing.Optional[str],
-        ]:
-            best = None
-            largest_overlap = 0
-
-            for other_loc in uid_to_name:
-                overlap = 0
-                if len(comp_location) < len(other_loc):
-                    continue
-
-                for i in range(min(len(comp_location), len(other_loc))):
-                    if other_loc[i] != comp_location[i]:
-                        break
-                    overlap += 1
-
-                if overlap > largest_overlap:
-                    best = other_loc
-
-            if best:
-                if len(best) == len(comp_location):
-                    fileref = None
-                else:
-                    fileref = '/'.join(comp_location[len(best)+1:]).lstrip('/')
-
-                return best, fileref
-
-            raise experiment.model.errors.DSLInvalidFieldError(
-                location=self.scope.dsl_location(),
-                underlying_error=ValueError(
-                    f"The Component {self.scope.location} contains the reference {from_ref} which does not "
-                    f"point to any known Components", uid_to_name
-                )
-            )
-
         for ref_str in parameters_output.union(arguments_output):
             ref = OutputReference.from_str(ref_str)
-            producer, fileref = infer_closest_match(comp_location=ref.location, from_ref=ref_str)
+            try:
+                producer, fileref = ref.split(scopes=uid_to_name)
+            except ValueError:
+                raise experiment.model.errors.DSLInvalidFieldError(
+                    location=self.scope.dsl_location(),
+                    underlying_error=ValueError(
+                        f"The Component {self.scope.location} contains the reference {ref_str} which does not "
+                        f"point to any known Components", uid_to_name
+                    )
+                )
             stage, producer = uid_to_name[producer]
 
             producer = f"stage{stage}.{producer}"

@@ -7,9 +7,9 @@ import typing
 import pytest
 import yaml
 
+import experiment.model.frontends.dsl
 import experiment.model.frontends.flowir
 import experiment.model.graph
-import experiment.model.frontends.dsl
 
 
 @pytest.fixture()
@@ -170,6 +170,7 @@ def dsl_one_workflow_one_component_two_steps_with_edges() -> typing.Dict[str, ty
         arguments: "%(message)s %(other)s"        
     """)
 
+
 @pytest.fixture()
 def dsl_two_workflows_one_component_one_step() -> typing.Dict[str, typing.Any]:
     return yaml.safe_load("""
@@ -216,7 +217,6 @@ def dsl_two_workflows_one_component_one_step() -> typing.Dict[str, typing.Any]:
         executable: echo
         arguments: "%(message)s %(other)s"
     """)
-
 
 
 @pytest.fixture()
@@ -555,11 +555,161 @@ def dsl_no_workflow() -> typing.Dict[str, typing.Any]:
     """)
 
 
+@pytest.fixture()
+def dsl_step_via_param_more_complex() -> typing.Dict[str, typing.Any]:
+    return yaml.safe_load("""
+    entrypoint:
+        entry-instance: main
+        execute:
+          - target: "<entry-instance>"
+    workflows:
+    - signature:
+        name: main
+        parameters: []
+      steps:
+        producer: inner-produce
+        consumer: inner-consume
+      execute:
+        - target: "<producer>"
+        - target: "<consumer>"
+          args:
+            producer: <producer/producer>
+    - signature:
+        name: inner-produce
+        parameters: []
+      steps:
+        producer: generate
+      execute:
+      - target: <producer>
+        args: {}
+    - signature:
+        name: inner-consume
+        parameters: 
+        - name: producer
+      steps:
+        consumer: echo
+      execute:
+      - target: <consumer>
+        args:
+          message: "%(producer)s/outputs/msg.txt:output"
+    components:
+    - signature:
+        name: generate
+        parameters: []
+      command:
+        executable: sh
+        arguments: -c "mkdir outputs; echo hi >outputs/msg.txt"
+        expandArguments: none
+    - signature:
+        name: echo
+        parameters:
+        - name: message
+      command:
+        executable: echo
+        arguments: "%(message)s"
+    """)
+
+
+@pytest.fixture()
+def dsl_step_via_param() -> typing.Dict[str, typing.Any]:
+    return yaml.safe_load("""
+entrypoint:
+    entry-instance: main
+    execute:
+      - target: "<entry-instance>"
+workflows:
+- signature:
+    name: main
+    parameters: []
+  steps:
+    producer: generate
+    consumer-wf: inner-consume
+  execute:
+    - target: <consumer-wf>
+      args:
+        producer: <producer>
+    - target: <producer>
+
+- signature:
+    name: inner-consume
+    parameters: 
+    - name: producer
+  steps:
+    consumer: echo
+  execute:
+  - target: <consumer>
+    args:
+      message: "%(producer)s/outputs/msg.txt:output"
+components:
+- signature:
+    name: generate
+    parameters: []
+  command:
+    executable: sh
+    arguments: -c "mkdir outputs; echo hi >outputs/msg.txt"
+    expandArguments: none
+- signature:
+    name: echo
+    parameters:
+    - name: message
+  command:
+    executable: echo
+    arguments: "%(message)s"
+    """)
+
+
+def test_output_reference_split():
+    ref = experiment.model.frontends.dsl.OutputReference.from_str("<entry-instance/producer/outputs/msg.txt>:output")
+    scopes = [("entry-instance",), ("entry-instance", "producer"), ("entry-instance", "consumer-wf"),
+        ("entry-instance", "consumer-wf", "consumer"), ]
+
+    producer, fileref = ref.split(scopes)
+
+    assert producer == ("entry-instance", "producer")
+    assert fileref == "outputs/msg.txt"
+
+
+def test_parse_dsl_step_via_param(dsl_step_via_param: typing.Dict[str, typing.Any]):
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl_step_via_param)
+
+    print(yaml.safe_dump(namespace.dict(by_alias=True, exclude_none=True), indent=2, sort_keys=False))
+
+    print("-----------")
+    flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
+    print(yaml.safe_dump(flowir.raw(), indent=2, sort_keys=False))
+
+    assert flowir.validate() == []
+
+    consumer = flowir.get_component((0, "consumer"))
+    producer = flowir.get_component((0, "producer"))
+
+    assert producer['references'] == []
+    assert consumer['references'] == ["stage0.producer/outputs/msg.txt:output"]
+
+
+def test_parse_dsl_step_via_param_more_complex(dsl_step_via_param_more_complex: typing.Dict[str, typing.Any]):
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl_step_via_param_more_complex)
+
+    print(yaml.safe_dump(namespace.dict(by_alias=True, exclude_none=True), indent=2, sort_keys=False))
+
+    print("-----------")
+    flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
+    print(yaml.safe_dump(flowir.raw(), indent=2, sort_keys=False))
+
+    assert flowir.validate() == []
+
+    consumer = flowir.get_component((0, "consumer"))
+    producer = flowir.get_component((0, "producer"))
+
+    assert producer['references'] == []
+    assert consumer['references'] == ["stage0.producer/outputs/msg.txt:output"]
+
+
 def test_parse_dsl_no_workflow(dsl_no_workflow: typing.Dict[str, typing.Any]):
     namespace = experiment.model.frontends.dsl.Namespace(**dsl_no_workflow)
 
-    print(yaml.safe_dump(namespace.dict(
-        by_alias=True, exclude_unset=True, exclude_defaults=True, exclude_none=True), indent=2))
+    print(yaml.safe_dump(namespace.dict(by_alias=True, exclude_unset=True, exclude_defaults=True, exclude_none=True),
+        indent=2))
 
     print("-----------")
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
@@ -576,8 +726,8 @@ def test_parse_hallucinated_simple_dsl2(simple_flowir: experiment.model.frontend
 
     namespace = experiment.model.frontends.dsl.Namespace(**dsl)
 
-    print(yaml.safe_dump(namespace.dict(
-        by_alias=True, exclude_unset=True, exclude_defaults=True, exclude_none=True), indent=2))
+    print(yaml.safe_dump(namespace.dict(by_alias=True, exclude_unset=True, exclude_defaults=True, exclude_none=True),
+        indent=2))
 
     print("-----------")
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
@@ -587,10 +737,10 @@ def test_parse_hallucinated_simple_dsl2(simple_flowir: experiment.model.frontend
     errors = flowir.validate()
     assert len(errors) == 2
 
-    err_unknown_reference = [x for x in errors
-                             if isinstance(x, experiment.model.errors.FlowIRUnknownReferenceInArguments)][0]
-    err_unknown_component = [x for x in errors
-                             if isinstance(x, experiment.model.errors.FlowIRReferenceToUnknownComponent)][0]
+    err_unknown_reference = \
+    [x for x in errors if isinstance(x, experiment.model.errors.FlowIRUnknownReferenceInArguments)][0]
+    err_unknown_component = \
+    [x for x in errors if isinstance(x, experiment.model.errors.FlowIRReferenceToUnknownComponent)][0]
 
     assert err_unknown_reference.ref_unknown == "dataset:ref"
     assert err_unknown_reference.component == "hello"
@@ -602,12 +752,11 @@ def test_parse_hallucinated_simple_dsl2(simple_flowir: experiment.model.frontend
     assert err_unknown_component.stage == 0
 
 
-
 def test_parse_band_gap_pm3_gamess_us(dsl_band_gap_pm3_gamess_us: typing.Dict[str, typing.Any]):
     namespace = experiment.model.frontends.dsl.Namespace(**dsl_band_gap_pm3_gamess_us)
 
-    print(yaml.safe_dump(namespace.dict(
-        by_alias=True, exclude_unset=True, exclude_defaults=True, exclude_none=True), indent=2))
+    print(yaml.safe_dump(namespace.dict(by_alias=True, exclude_unset=True, exclude_defaults=True, exclude_none=True),
+        indent=2))
     print("-----------")
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
     print(yaml.safe_dump(flowir.raw(), indent=2))
@@ -616,19 +765,11 @@ def test_parse_band_gap_pm3_gamess_us(dsl_band_gap_pm3_gamess_us: typing.Dict[st
 
     assert len(errors) == 0
 
-    components = sorted([
-        f"stage{comp['stage']}.{comp['name']}" for comp in flowir.get_components()
-    ])
+    components = sorted([f"stage{comp['stage']}.{comp['name']}" for comp in flowir.get_components()])
 
-    assert components == sorted([
-        'stage0.GetMoleculeIndex',
-        'stage0.SMILESToXYZ',
-        'stage0.SetBasis',
-        'stage0.XYZToGAMESS',
-        'stage1.CreateLabels',
-        'stage1.ExtractEnergies',
-        'stage1.GeometryOptimisation'
-    ])
+    assert components == sorted(
+        ['stage0.GetMoleculeIndex', 'stage0.SMILESToXYZ', 'stage0.SetBasis', 'stage0.XYZToGAMESS',
+            'stage1.CreateLabels', 'stage1.ExtractEnergies', 'stage1.GeometryOptimisation'])
 
     assert len(flowir.validate()) == 0
 
@@ -638,17 +779,13 @@ def test_parse_band_gap_pm3_gamess_us(dsl_band_gap_pm3_gamess_us: typing.Dict[st
     ('"<workflow/component>"/file:ref', ["workflow", "component", "file"], "ref", "<workflow/component/file>:ref"),
     ('"<workflow>"/component/file:ref', ["workflow", "component", "file"], "ref", "<workflow/component/file>:ref"),
     ('"<workflow>":ref', ["workflow"], "ref", "<workflow>:ref"),
-    ('<workflow>:ref', ["workflow"], "ref", "<workflow>:ref"),
-    ('"<workflow>"', ["workflow"], None, "<workflow>"),
+    ('<workflow>:ref', ["workflow"], "ref", "<workflow>:ref"), ('"<workflow>"', ["workflow"], None, "<workflow>"),
     ('<workflow>', ["workflow"], None, "<workflow>"),
     ("<workflow/component/file>", ["workflow", "component", "file"], None, "<workflow/component/file>"),
-    ('"<workflow/component>"/file', ["workflow", "component", "file"], None, "<workflow/component/file>"),
-    ('<stage0.XYZToGAMESS>/molecule.inp:copy', ["stage0.XYZToGAMESS", "molecule.inp"], "copy",
-        "<stage0.XYZToGAMESS/molecule.inp>:copy")
-])
-def test_parse_step_references(input_outputs: typing.Tuple[
-    str, typing.List[str], typing.Optional[str], str,
-]):
+    ('"<workflow/component>"/file', ["workflow", "component", "file"], None, "<workflow/component/file>"), (
+    '<stage0.XYZToGAMESS>/molecule.inp:copy', ["stage0.XYZToGAMESS", "molecule.inp"], "copy",
+    "<stage0.XYZToGAMESS/molecule.inp>:copy")])
+def test_parse_step_references(input_outputs: typing.Tuple[str, typing.List[str], typing.Optional[str], str,]):
     ref_str, expected_location, expected_method, expected_rewrite = input_outputs
 
     ref = experiment.model.frontends.dsl.OutputReference.from_str(ref_str)
@@ -659,39 +796,20 @@ def test_parse_step_references(input_outputs: typing.Tuple[
 
 
 def test_replace_many_parameter_references():
-    x = experiment.model.frontends.dsl._replace_many_parameter_references(
-        what="%(message)s %(other)s",
-        loc=[],
-        parameters= {
-            "message": "hello",
-            "other": "world",
-            "environment": {"hi": "there"}
-        },
-        field=[],
-    )
+    x = experiment.model.frontends.dsl._replace_many_parameter_references(what="%(message)s %(other)s", loc=[],
+        parameters={"message": "hello", "other": "world", "environment": {"hi": "there"}}, field=[], )
 
     assert x == "hello world"
 
 
-@pytest.mark.parametrize("fixture_name", [
-    "dsl_one_workflow_one_component_one_step_no_datareferences",
-    "dsl_two_workflows_one_component_one_step",
-])
+@pytest.mark.parametrize("fixture_name", ["dsl_one_workflow_one_component_one_step_no_datareferences",
+    "dsl_two_workflows_one_component_one_step", ])
 def test_dsl2_single_workflow_single_component_single_step_no_datareferences(fixture_name: str, request):
     dsl = request.getfixturevalue(argname=fixture_name)
     namespace = experiment.model.frontends.dsl.Namespace(**dsl)
 
-    print(
-        yaml.safe_dump(
-            namespace.dict(
-                exclude_unset=True,
-                exclude_none=True,
-                exclude_defaults=True,
-                by_alias=True
-            ),
-            sort_keys=False
-        )
-    )
+    print(yaml.safe_dump(namespace.dict(exclude_unset=True, exclude_none=True, exclude_defaults=True, by_alias=True),
+        sort_keys=False))
 
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
 
@@ -699,43 +817,23 @@ def test_dsl2_single_workflow_single_component_single_step_no_datareferences(fix
 
     raw_flowir = flowir.raw()
     assert len(raw_flowir["components"]) == 1
-    assert raw_flowir["components"][0] == {
-        "stage": 0,
-        "name": "greetings",
-        "references": [],
-        "command": {
-            "executable": "echo",
-            "arguments": "hello world",
-            "environment": "env0"
-        }
-    }
+    assert raw_flowir["components"][0] == {"stage": 0, "name": "greetings", "references": [],
+        "command": {"executable": "echo", "arguments": "hello world", "environment": "env0"}}
 
     assert len(raw_flowir["environments"]["default"]) == 1
-    assert raw_flowir["environments"]["default"]["env0"] == {
-        "DEFAULTS": "PATH:LD_LIBRARY_PATH",
-        "AN_ENV_VAR": "ITS_VALUE"
-    }
+    assert raw_flowir["environments"]["default"]["env0"] == {"DEFAULTS": "PATH:LD_LIBRARY_PATH",
+        "AN_ENV_VAR": "ITS_VALUE"}
 
     errors = flowir.validate()
     assert len(errors) == 0
 
 
 def test_dsl2_single_workflow_one_component_two_steps_no_edges(
-    dsl_one_workflow_one_component_two_steps_no_edges: typing.Dict[str, typing.Any]
-):
+        dsl_one_workflow_one_component_two_steps_no_edges: typing.Dict[str, typing.Any]):
     namespace = experiment.model.frontends.dsl.Namespace(**dsl_one_workflow_one_component_two_steps_no_edges)
 
-    print(
-        yaml.safe_dump(
-            namespace.dict(
-                exclude_unset=True,
-                exclude_none=True,
-                exclude_defaults=True,
-                by_alias=True
-            ),
-            sort_keys=False
-        )
-    )
+    print(yaml.safe_dump(namespace.dict(exclude_unset=True, exclude_none=True, exclude_defaults=True, by_alias=True),
+        sort_keys=False))
 
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
 
@@ -743,61 +841,28 @@ def test_dsl2_single_workflow_one_component_two_steps_no_edges(
 
     raw_flowir = flowir.raw()
     assert len(raw_flowir["components"]) == 2
-    assert [x for x in raw_flowir["components"] if x['name'] == 'one'][0] == {
-        "stage": 0,
-        "name": "one",
-        "references": [],
-        "command": {
-            "executable": "echo",
-            "arguments": "hello from one world",
-            "environment": "env0"
-        }
-    }
+    assert [x for x in raw_flowir["components"] if x['name'] == 'one'][0] == {"stage": 0, "name": "one",
+        "references": [], "command": {"executable": "echo", "arguments": "hello from one world", "environment": "env0"}}
 
-    assert [x for x in raw_flowir["components"] if x['name'] == 'two'][0] == {
-        "stage": 0,
-        "name": "two",
-        "references": [],
-        "command": {
-            "executable": "echo",
-            "arguments": "hello from two world",
-            "environment": "env0"
-        }
-    }
+    assert [x for x in raw_flowir["components"] if x['name'] == 'two'][0] == {"stage": 0, "name": "two",
+        "references": [], "command": {"executable": "echo", "arguments": "hello from two world", "environment": "env0"}}
 
     assert len(raw_flowir["environments"]["default"]) == 1
-    assert raw_flowir["environments"]["default"]["env0"] == {
-        "DEFAULTS": "PATH:LD_LIBRARY_PATH",
-        "AN_ENV_VAR": "ITS_VALUE"
-    }
+    assert raw_flowir["environments"]["default"]["env0"] == {"DEFAULTS": "PATH:LD_LIBRARY_PATH",
+        "AN_ENV_VAR": "ITS_VALUE"}
 
-
-    assert raw_flowir["variables"]["default"]["global"] == {
-        "foo": "world",
-        "unused": "value-unused"
-    }
+    assert raw_flowir["variables"]["default"]["global"] == {"foo": "world", "unused": "value-unused"}
 
     errors = flowir.validate()
     assert len(errors) == 0
 
 
-
 def test_dsl2_single_workflow_one_component_two_steps_with_edges(
-    dsl_one_workflow_one_component_two_steps_with_edges: typing.Dict[str, typing.Any]
-):
+        dsl_one_workflow_one_component_two_steps_with_edges: typing.Dict[str, typing.Any]):
     namespace = experiment.model.frontends.dsl.Namespace(**dsl_one_workflow_one_component_two_steps_with_edges)
 
-    print(
-        yaml.safe_dump(
-            namespace.dict(
-                exclude_unset=True,
-                exclude_none=True,
-                exclude_defaults=True,
-                by_alias=True
-            ),
-            sort_keys=False
-        )
-    )
+    print(yaml.safe_dump(namespace.dict(exclude_unset=True, exclude_none=True, exclude_defaults=True, by_alias=True),
+        sort_keys=False))
 
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
 
@@ -805,40 +870,18 @@ def test_dsl2_single_workflow_one_component_two_steps_with_edges(
 
     raw_flowir = flowir.raw()
     assert len(raw_flowir["components"]) == 2
-    assert [x for x in raw_flowir["components"] if x['name'] == 'one'][0] == {
-        "stage": 0,
-        "name": "one",
-        "references": [],
-        "command": {
-            "executable": "echo",
-            "arguments": "hello from one world",
-            "environment": "env0"
-        }
-    }
+    assert [x for x in raw_flowir["components"] if x['name'] == 'one'][0] == {"stage": 0, "name": "one",
+        "references": [], "command": {"executable": "echo", "arguments": "hello from one world", "environment": "env0"}}
 
-    assert [x for x in raw_flowir["components"] if x['name'] == 'two'][0] == {
-        "stage": 0,
-        "name": "two",
-        "references": [
-            "stage0.one:output"
-        ],
-        "command": {
-            "executable": "echo",
-            "arguments": "hello from two stage0.one:output",
-            "environment": "env0"
-        }
-    }
+    assert [x for x in raw_flowir["components"] if x['name'] == 'two'][0] == {"stage": 0, "name": "two",
+        "references": ["stage0.one:output"],
+        "command": {"executable": "echo", "arguments": "hello from two stage0.one:output", "environment": "env0"}}
 
     assert len(raw_flowir["environments"]["default"]) == 1
-    assert raw_flowir["environments"]["default"]["env0"] == {
-        "DEFAULTS": "PATH:LD_LIBRARY_PATH",
-        "AN_ENV_VAR": "ITS_VALUE"
-    }
+    assert raw_flowir["environments"]["default"]["env0"] == {"DEFAULTS": "PATH:LD_LIBRARY_PATH",
+        "AN_ENV_VAR": "ITS_VALUE"}
 
-    assert raw_flowir["variables"]["default"]["global"] == {
-        "foo": "world",
-        "unused": "value-unused"
-    }
+    assert raw_flowir["variables"]["default"]["global"] == {"foo": "world", "unused": "value-unused"}
 
     errors = flowir.validate()
     assert len(errors) == 0

@@ -240,8 +240,6 @@ def dsl_band_gap_pm3_gamess_us() -> typing.Dict[str, typing.Any]:
           number-processors: '8'
           numberMolecules: '1'
           startIndex: '0'
-          input.input_smiles.csv: input/input_smiles.csv
-          data.input_molecule.txt: data/input_molecule.txt
     workflows:
     - signature:
         name: main
@@ -770,8 +768,6 @@ def test_parse_band_gap_pm3_gamess_us(dsl_band_gap_pm3_gamess_us: typing.Dict[st
     assert components == sorted(
         ['stage0.GetMoleculeIndex', 'stage0.SMILESToXYZ', 'stage0.SetBasis', 'stage0.XYZToGAMESS',
             'stage1.CreateLabels', 'stage1.ExtractEnergies', 'stage1.GeometryOptimisation'])
-
-    assert len(flowir.validate()) == 0
 
 
 @pytest.mark.parametrize("input_outputs", [

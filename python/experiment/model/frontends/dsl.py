@@ -8,14 +8,14 @@
 The DSL v2.0.0 is evolving, below we describe the schema v0.1.0 with hints about v0.2.0 (i.e.
 support for using more than 1 namespaces).
 
-The namespace is a collection of Workflow and Component blueprints.
+The namespace is a collection of Workflow and Component templates.
 
 A namespace optionally contains an "entrypoint" that explains to execute one Workflow or one Component instance
 whose definition is part of the namespace.
 
-Workflow and Component blueprints have a "signature" which consists of a unique name and a list of parameters.
+Workflow and Component templates have a "signature" which consists of a unique name and a list of parameters.
 
-A Workflow blueprint explains how to instantiate other Workflow or Component blueprints and use them as
+A Workflow template explains how to instantiate other Workflow or Component templates and use them as
 "steps". For each step, the workflow describes how to assign arguments to the parameters of the step. The
 arguments can be literals, parameters of the parent workflow, or outputs of other steps. Steps cannot form
 direct, or indirect, cycles.
@@ -36,7 +36,7 @@ direct, or indirect, cycles.
     - :link
     - :extract
 
-Instantiated Blueprints have outputs:
+Instantiated templates have outputs:
   Workflow: the outputs are the steps
   Component: the outputs are files (and streams) that the components produce
 
@@ -119,10 +119,10 @@ StepNameOrPathPattern = r"[^/:]+"
 
 PatternReferenceMethod = f"(:(?P<method>(ref|copy|output|link|extract)))"
 
-BlueprintPattern = rf"{StepNamePattern}(/({StepNameOrPathPattern}))*"
-OutputReferenceVanilla = (rf"(?P<location>(<{BlueprintPattern}/?>))(/(?P<location_nested>{BlueprintPattern}))?"
+TemplatePattern = rf"{StepNamePattern}(/({StepNameOrPathPattern}))*"
+OutputReferenceVanilla = (rf"(?P<location>(<{TemplatePattern}/?>))(/(?P<location_nested>{TemplatePattern}))?"
                           rf"{PatternReferenceMethod}?")
-OutputReferenceNested = rf'(?P<location>"<{BlueprintPattern}>")(/(?P<location_nested>{BlueprintPattern}))?'\
+OutputReferenceNested = rf'(?P<location>"<{TemplatePattern}>")(/(?P<location_nested>{TemplatePattern}))?'\
                              rf'{PatternReferenceMethod}?'
 RevampedReferencePattern = fr'"(?P<reference>([.a-zA-Z0-9_/-])+)"{PatternReferenceMethod}'
 LegacyReferencePattern = fr'(?P<reference>([.a-zA-Z0-9_/-])+){PatternReferenceMethod}'
@@ -186,7 +186,7 @@ class OutputReference:
                 method = None
             return cls(location=location, method=method)
 
-        raise ValueError(f"{ref_str} is not a valid reference to the output of a Blueprint")
+        raise ValueError(f"{ref_str} is not a valid reference to the output of a Template")
 
     def to_str(self):
         from_location = f"<{'/'.join(self.location)}>"
@@ -275,13 +275,13 @@ class Signature(pydantic.BaseModel):
         extra = "forbid"
 
     name: str = pydantic.Field(
-        description="The name of the blueprint, must be unique in the parent namespace",
+        description="The name of the template, must be unique in the parent namespace",
         min_length=1,
         # VV: Names cannot end in digits - FlowIR has a special meaning for digits at the end of component names
         regex=SignatureNamePattern
     )
     parameters: typing.List[Parameter] = pydantic.Field(
-        description="The collection of the parameters to the blueprint"
+        description="The collection of the parameters to the template"
     )
 
 
@@ -290,10 +290,10 @@ class InstantiatedSignature(pydantic.BaseModel):
         extra = "forbid"
 
     name: str = pydantic.Field(
-        description="The name of the blueprint, must be unique in the parent namespace"
+        description="The name of the template, must be unique in the parent namespace"
     )
     parameters: typing.List[InstantiatedParameter] = pydantic.Field(
-        description="The collection of the parameters to the blueprint"
+        description="The collection of the parameters to the template"
     )
 
 
@@ -328,13 +328,13 @@ class Workflow(pydantic.BaseModel):
         extra = "forbid"
 
     signature: Signature = pydantic.Field(
-        description="The Signature of the Workflow blueprint"
+        description="The Signature of the Workflow template"
     )
 
     steps: typing.Dict[str, pydantic.constr(regex=SignatureNamePattern)] = pydantic.Field(
-        description="Instantiated Blueprints that execute as steps of the parent workflow. "
+        description="Instantiated Templates that execute as steps of the parent workflow. "
                     "key: value pairs where the key is the name of the Instance and the value is the name "
-                    "of the Blueprint from which to create the Instance."
+                    "of the Template from which to create the Instance."
     )
 
     execute: typing.List[ExecuteStep] = pydantic.Field(
@@ -456,7 +456,7 @@ class CResourceManagerKubernetes(pydantic.BaseModel):
 
     podSpec: typing.Optional[typing.Dict[str, typing.Any]] = pydantic.Field(
         None,
-        description="(Beta) A template Pod blueprint to use for generating the pods of Tasks for this component "
+        description="(Beta) A template Pod template to use for generating the pods of Tasks for this component "
                     "(advanced feature)."
     )
 
@@ -815,7 +815,7 @@ def replace_parameter_references(
         all_scopes: typing.Dict[typing.Tuple[str], "ScopeStack.Scope"],
         location: typing.Iterable[str],
 ) -> ParameterValueType:
-    """Resolves a value given the location of the owner blueprint instance and a book of all scopes
+    """Resolves a value given the location of the owner template instance and a book of all scopes
 
     Args:
 
@@ -881,12 +881,12 @@ class Component(pydantic.BaseModel):
         extra = "forbid"
 
     signature: Signature = pydantic.Field(
-        description="The Signature of the Component blueprint"
+        description="The Signature of the Component template"
     )
 
     command: CCommand = pydantic.Field(
         default_factory=CCommand,
-        description="The command that the tasks of this Component blueprint execute"
+        description="The command that the tasks of this Component template execute"
     )
 
     workflowAttributes: CWorkflowAttributes = pydantic.Field(
@@ -918,7 +918,7 @@ class Entrypoint(pydantic.BaseModel):
 
     # VV: FIXME Rename this into "entryInstance" (i.e. remove the alias)
     entryInstance: str = pydantic.Field(
-        description="The identifier of the entrypoint blueprint",
+        description="The identifier of the entrypoint template",
         alias="entry-instance"
     )
 
@@ -926,7 +926,7 @@ class Entrypoint(pydantic.BaseModel):
         [],
         min_items=1,
         max_items=1,
-        description="How to execute the instance of the entrypoint blueprint in this namespace"
+        description="How to execute the instance of the entrypoint template in this namespace"
     )
 
 
@@ -935,61 +935,61 @@ class Namespace(pydantic.BaseModel):
         extra = "forbid"
 
     entrypoint: typing.Optional[Entrypoint] = pydantic.Field(
-        None, description="How to execute the entrypoint blueprint"
+        None, description="How to execute the entrypoint template"
     )
 
-    workflows: typing.Optional[typing.List[Workflow]] = pydantic.Field(
-        None, description="The Workflow blueprints of this namespace"
+    workflows: typing.List[Workflow] = pydantic.Field(
+        [], description="The Workflow templates of this namespace"
     )
 
-    components: typing.Optional[typing.List[Component]] = pydantic.Field(
-        None, description="The Component blueprints of this namespace"
+    components: typing.List[Component] = pydantic.Field(
+        [], description="The Component templates of this namespace"
     )
 
-    def get_blueprint(self, name: str) -> typing.Union[Workflow, Component]:
+    def get_template(self, name: str) -> typing.Union[Workflow, Component]:
         for t in (self.components or []) + (self.workflows or []):
             if t.signature.name == name:
                 return t
-        raise KeyError(f"No blueprint with name {name}")
+        raise KeyError(f"No template with name {name}")
 
 
 class ScopeStack:
     """A collection of all reachable Scopes starting from the Entrypoint of a Namespace"""
     
     class Scope:
-        """Describes how to instantiate a @blueprint at a certain @location with certain @parameters"""
+        """Describes how to instantiate a @template at a certain @location with certain @parameters"""
         def __init__(
             self,
             location: typing.List[str],
             parameters: typing.Dict[str, ParameterValueType],
-            blueprint: typing.Union[Workflow, Component]
+            template: typing.Union[Workflow, Component]
         ):
             self.location = location
             self.parameters = parameters or {}
-            self.blueprint = blueprint.copy(deep=True)
+            self.template = template.copy(deep=True)
 
         @property
         def name(self) -> str:
             return self.location[-1]
 
         def dsl_location(self) -> typing.List[str]:
-            bp_type = "workflows" if isinstance(self.blueprint, Workflow) else "components"
-            return [bp_type, self.blueprint.signature.name]
+            bp_type = "workflows" if isinstance(self.template, Workflow) else "components"
+            return [bp_type, self.template.signature.name]
 
         def verify_parameters(self, caller_location: experiment.model.errors.DSLLocation):
             """Utility method to verify the parameters of a scope
 
              Args:
                  caller_location:
-                    The location of the YAML field that instantiates this Blueprint
+                    The location of the YAML field that instantiates this Template
 
              Raises:
                  experiment.model.errors.DSLInvalidError:
-                    If the caller of the Blueprint references unknown parameters
+                    If the caller of the Template references unknown parameters
             """
             dsl_error = experiment.model.errors.DSLInvalidError([])
 
-            known_params = [p.name for p in self.blueprint.signature.parameters]
+            known_params = [p.name for p in self.template.signature.parameters]
 
             for name in self.parameters:
                 if name not in known_params:
@@ -1004,10 +1004,10 @@ class ScopeStack:
                 raise dsl_error
 
         def fold_in_defaults_of_parameters(self):
-            """Utility method to update the @parameters ivar with default values to the parameters of the Blueprint
+            """Utility method to update the @parameters ivar with default values to the parameters of the Template
             """
             known_params = {
-                p.name: p.default for p in self.blueprint.signature.parameters
+                p.name: p.default for p in self.template.signature.parameters
                 if "default" in p.__fields_set__
             }
 
@@ -1167,14 +1167,14 @@ class ScopeStack:
                         underlying_error=ValueError(f"Unable to identify the parent Workflow of {self.location}")
                     )
 
-                if not isinstance(parent_scope.blueprint, Workflow):
+                if not isinstance(parent_scope.template, Workflow):
                     raise experiment.model.errors.DSLInvalidFieldError(
                         location=["workflows", parent_workflow_name],
                         underlying_error=ValueError(
                             f"The parent of {self.location} is not a Workflow but a {type(parent_scope)}")
                     )
 
-                sibling_steps=[x for x in parent_scope.blueprint.steps if x != self.name]
+                sibling_steps=[x for x in parent_scope.template.steps if x != self.name]
             else:
                 # VV: this can only happen in entrypoint.execute
                 uid_parent = []
@@ -1218,18 +1218,18 @@ class ScopeStack:
         # VV: The current collection of Scopes. The scope at the end of the list is the "current" scope.
         self.stack: typing.List[ScopeStack.Scope] = []
 
-        # VV: Keys are "locations" of blueprint instances i.e. ["entry-instance", "parentWorkflow", "component"]
-        # think of this as the full path an instance of a blueprint starting from the root of the namespace.
+        # VV: Keys are "locations" of template instances i.e. ["entry-instance", "parentWorkflow", "component"]
+        # think of this as the full path an instance of a template starting from the root of the namespace.
         # The root of the namespace is what the entrypoint invokes, it's name is always `entry-instance`.
-        # The values are the ScopeEntries which are effectively instances of a Blueprint i.e.
-        # The instance name, definition, and parameters of a Blueprint
+        # The values are the ScopeEntries which are effectively instances of a Template i.e.
+        # The instance name, definition, and parameters of a Template
         self.scopes: typing.Dict[typing.Tuple[str], ScopeStack.Scope] = {}
 
     def enter(
             self,
             name: str,
             parameters: typing.Dict[str, ParameterValueType],
-            blueprint: typing.Union[Workflow, Component]
+            template: typing.Union[Workflow, Component]
     ):
         parameters = copy.deepcopy(parameters)
         errors = []
@@ -1240,9 +1240,9 @@ class ScopeStack:
         if uid in self.scopes:
             errors.append(ValueError(f"Node has already been visited", location))
 
-        scope_entry = ScopeStack.Scope(location=location, parameters=parameters, blueprint=blueprint)
+        scope_entry = ScopeStack.Scope(location=location, parameters=parameters, template=template)
 
-        for p in blueprint.signature.parameters:
+        for p in template.signature.parameters:
             if p.name in parameters:
                 continue
             if "default" not in p.__fields_set__:
@@ -1281,6 +1281,13 @@ class ScopeStack:
     def get_location(self) -> typing.List[str]:
         return [s.name for s in self.stack]
 
+    def get_parent_dsl_location(self) -> typing.List[str]:
+        if self.depth() > 1:
+            uid = tuple(self.get_location()[:-1])
+            scope = self.scopes[uid]
+            return scope.dsl_location()
+
+        return ["entrypoint"]
 
     def get_parent_parameter_names(self) -> typing.List[str]:
         if self.depth() > 1:
@@ -1292,7 +1299,7 @@ class ScopeStack:
 
     def _seed_all_scopes(self, namespace: Namespace) -> typing.List[Exception]:
         """Utility method to visit all Workflows and Components which are reachable from the Entrypoint and seed
-        the ScopeStack with 1 scope for each visited blueprint
+        the ScopeStack with 1 scope for each visited template
 
         The utility method updates the `all_scopes` ivar.
 
@@ -1313,14 +1320,13 @@ class ScopeStack:
                 Action.Enter,
                 ScopeStack.Scope(
                     location=["entry-instance"],
-                    blueprint=namespace.get_blueprint(namespace.entrypoint.entryInstance),
+                    template=namespace.get_template(namespace.entrypoint.entryInstance),
                     parameters=namespace.entrypoint.execute[0].args,
                 )
             )
         ]
 
         dsl_error = experiment.model.errors.DSLInvalidError([])
-        errors: typing.List[Exception] = []
 
         rg_param = re.compile(ParameterPattern)
         while remaining_scopes:
@@ -1329,7 +1335,7 @@ class ScopeStack:
                 self.exit()
                 continue
             try:
-                scope = self.enter(name=scope.name, parameters=scope.parameters, blueprint=scope.blueprint)
+                scope = self.enter(name=scope.name, parameters=scope.parameters, template=scope.template)
             except experiment.model.errors.DSLInvalidError as e:
                 dsl_error.underlying_errors += e.underlying_errors
                 break
@@ -1340,7 +1346,7 @@ class ScopeStack:
             if location != ["entry-instance"]:
                 parent_scope = self.scopes[tuple(location[:-1])]
                 parent_scope.dsl_location()
-                workflow: Workflow = parent_scope.blueprint
+                workflow: Workflow = parent_scope.template
                 field_invoke_loc = ["workflows", workflow.signature.name] + ["execute"]
                 for idx, step in enumerate(workflow.execute):
                     step: ExecuteStep = step
@@ -1365,25 +1371,42 @@ class ScopeStack:
                         if param not in parent_parameters:
                             if param == "replica":
                                 continue
-                            errors.append(KeyError(
+                            exc = KeyError(
                                 f"Node {location} references the parameter {param} but its parent "
-                                f"does not have such a parameter, it has {parent_parameters}"))
+                                f"does not have such a parameter, it has {parent_parameters}")
+                            dsl_error.underlying_errors.append(
+                                experiment.model.errors.DSLInvalidFieldError(
+                                    location=self.get_parent_dsl_location(),
+                                    underlying_error=exc
+                                )
+                            )
 
-            if isinstance(scope.blueprint, Workflow):
+
+            if isinstance(scope.template, Workflow):
                 children_scopes = []
-                for execute in scope.blueprint.execute:
+                for idx, execute in enumerate(scope.template.execute):
                     child_location = location + [execute.get_target()]
 
                     try:
-                        blueprint_name = scope.blueprint.steps[execute.get_target()]
+                        template_name = scope.template.steps[execute.get_target()]
                     except KeyError:
-                        errors.append(KeyError(f"Node {child_location} has no matching step"))
+                        dsl_error.underlying_errors.append(
+                            experiment.model.errors.DSLInvalidFieldError(
+                                location=scope.dsl_location() + ["execute", idx],
+                                underlying_error=KeyError(f"Node {child_location} has no matching step")
+                            )
+                        )
                         continue
 
                     try:
-                        blueprint = namespace.get_blueprint(blueprint_name)
+                        template = namespace.get_template(template_name)
                     except KeyError as e:
-                        errors.append(e)
+                        dsl_error.underlying_errors.append(
+                            experiment.model.errors.DSLInvalidFieldError(
+                                location=scope.dsl_location() + ["execute", idx],
+                                underlying_error=KeyError(f"Node {child_location} has no matching template")
+                            )
+                        )
                         continue
 
                     parameters = copy.deepcopy(execute.args or {})
@@ -1391,22 +1414,22 @@ class ScopeStack:
                     new_scope = ScopeStack.Scope(
                         location=scope.location + [execute.get_target()],
                         parameters=parameters,
-                        blueprint=blueprint,
+                        template=template,
                     )
 
-                    if isinstance(blueprint, Workflow):
+                    if isinstance(template, Workflow):
                         children_scopes.append((Action.Enter, new_scope))
                     else:
                         children_scopes.insert(0, (Action.Enter, new_scope))
 
                 remaining_scopes = children_scopes + remaining_scopes
-            elif isinstance(scope.blueprint, Component):
+            elif isinstance(scope.template, Component):
                 pass
             else:
                 location = '\n'.join(location)
                 raise NotImplementedError(f"Cannot visit location {location} for Node", scope)
 
-        return errors
+        return dsl_error.underlying_errors
 
     @classmethod
     def from_namespace(cls, namespace: Namespace) -> "ScopeStack":
@@ -1428,7 +1451,7 @@ class ScopeStack:
         ):
             scope_errors = []
             # VV: Workflows can use the arguments of their step Workflows to propagate the outputs of their children
-            # steps to their grandchildren. This means that it is valid for a Blueprint that is instantiated by a
+            # steps to their grandchildren. This means that it is valid for a Template that is instantiated by a
             # deeply nested workflow to eventually (i.e. via a chain of parameters) receive an OutputReference whose
             # location is a step that is NOT a sibling step.
             # Therefore, we want to ensure that references point to sibling steps before we resolve any parameters.
@@ -1449,15 +1472,15 @@ class ScopeStack:
             return  scope_errors
 
         for location, scope in scope_stack.scopes.items():
-            if isinstance(scope.blueprint, Workflow):
+            if isinstance(scope.template, Workflow):
                 errors.extend(resolve_scope(scope=scope, scope_stack=scope_stack))
 
         for location, scope in scope_stack.scopes.items():
-            if isinstance(scope.blueprint, Component):
+            if isinstance(scope.template, Component):
                 errors.extend(resolve_scope(scope=scope, scope_stack=scope_stack))
 
         # for location, scope in scope_stack.scopes.items():
-        #     print(type(scope.blueprint).__name__, scope.location, "parameters", scope.parameters)
+        #     print(type(scope.template).__name__, scope.location, "parameters", scope.parameters)
 
         if errors:
             raise experiment.model.errors.DSLInvalidError.from_errors(errors)
@@ -1476,7 +1499,7 @@ class ComponentFlowIR:
         self.scope = scope
         self.errors = errors
 
-        self.flowir = scope.blueprint.dict(
+        self.flowir = scope.template.dict(
             by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True
         )
 
@@ -1488,7 +1511,7 @@ class ComponentFlowIR:
 
     @property
     def step_name(self) -> str:
-        # VV: The step name is the last entry in the location of the Blueprint instance
+        # VV: The step name is the last entry in the location of the Template instance
         return self.scope.location[-1]
 
     def _get_refs_in_param(self, pattern: str) -> typing.Dict[str, typing.List[str]]:
@@ -1549,7 +1572,7 @@ class ComponentFlowIR:
             ref = OutputReference.from_str(match.group(0))
             if not ref.method:
                 raise experiment.model.errors.DSLInvalidFieldError(
-                    location=["components", self.scope.blueprint.signature.name, "command", "arguments"],
+                    location=["components", self.scope.template.signature.name, "command", "arguments"],
                     underlying_error=ValueError(f"The arguments of {self.scope.location} contain a reference to "
                                  f"the output {match.group(0)} but the OutputReference is partial, it does not "
                                  f"end with a :$method suffix.")
@@ -1574,7 +1597,7 @@ class ComponentFlowIR:
                     else:
                         raise experiment.model.errors.DSLInvalidFieldError(
                             location=[
-                                "components", self.scope.blueprint.signature.name, "signature", "parameters", name
+                                "components", self.scope.template.signature.name, "signature", "parameters", name
                             ],
                             underlying_error=ValueError(
                                 f"The parameter {name}={value} of the Component {self.scope.location} "
@@ -1709,14 +1732,57 @@ def number_to_roman_like_numeral(value: int) -> str:
 
     return rep
 
+
+def auto_generate_entrypoint(
+    namespace: Namespace
+):
+    """Auto-generates the entrypoint of a dsl2 namespace
+
+    The method assumes that the namespace is valid, it auto-inserts values for special parameters:
+    - input.<a file name>
+    - data.<a file name>
+
+    These are special parameters of the entry-instance Template which should not have a value and their value
+    should be:
+
+    - input/<a file name>
+    - data/<a file name>
+
+    Args:
+        namespace:
+            the DSL 2.0 definition of a namespace, it's updated in place
+    """
+    if not namespace.entrypoint:
+        return
+
+    if not len(namespace.entrypoint.execute or []) == 1:
+        return
+
+    entry_instance = namespace.entrypoint.execute[0]
+
+    if entry_instance.args is None:
+        entry_instance.args = {}
+
+    try:
+        template = namespace.get_template(namespace.entrypoint.entryInstance)
+    except Exception as e:
+        return
+
+    for param in template.signature.parameters:
+        if param.name.startswith("input.") or param.name.startswith("data."):
+            # VV: turn input.my-inputs.csv into input/my-inputs.csv
+            entry_instance.args[param.name] = param.name.replace(".", "/", 1)
+
+
+
 def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flowir.FlowIRConcrete:
     """Converts a Namespace to flowir
 
     Algorithm:
 
     1. visit all reachable nodes starting from the entrypoint (not necessarily in scheduling order)
-    2. verify that all reachable nodes reference a blueprint that actually exists
-    3. build a mapping of unique node identifiers to the blueprint that they reference
+    2. verify that all reachable nodes reference a template that actually exists
+    3. build a mapping of unique node identifiers to the template that they reference
     4. after visiting all nodes if there're any errors raise an exception and stop, else:
     5. revisit all Component nodes (order doesn't matter) and:
        - generate unique names for components (resolve name conflicts by appending roman numerals to component names)
@@ -1739,13 +1805,20 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
         experiment.model.errors.DSLInvalidError:
             When there are errors
     """
+
+    # VV: Make a copy in the namespace and work on that, because in `auto_generate_entrypoint()` we'll patch the
+    # entrypoint so that special parameters of the entry-instance Template (like input.<name> and data.<name>)
+    # receive a value
+    namespace = namespace.copy(deep=True)
+    auto_generate_entrypoint(namespace)
+
     scopes =  ScopeStack.from_namespace(namespace)
 
     components: typing.Dict[typing.Tuple[str], ComponentFlowIR] = {}
     errors = []
 
     for location, scope in scopes.scopes.items():
-        if isinstance(scope.blueprint, Component):
+        if isinstance(scope.template, Component):
             comp_flowir = digest_dsl_component(scope=scope)
             errors.extend(comp_flowir.errors)
             components[tuple(scope.location)] = comp_flowir
@@ -1759,7 +1832,7 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
     pattern_name = re.compile(SignatureNamePattern)
 
     for _, comp in components.items():
-        assert isinstance(comp.scope.blueprint, Component)
+        assert isinstance(comp.scope.template, Component)
 
         if comp.step_name not in component_names:
             component_names[comp.step_name] = 0
@@ -1849,11 +1922,11 @@ def digest_dsl_component(
     """Utility method to generate information that the caller can use to put together a FlowIRConcrete instance
 
     At this point, parameters are either e.g. float, int, str, dictionaries or None
-    Strings may point to other Blueprint instances, when they to, they look like:
+    Strings may point to other Template instances, when they to, they look like:
      - <optional/this>[:${method}] (i.e. an optional method)
      - "<optional/this>"[/optional/path][:${method}]
     If such kind of strings appear in arguments, they **must** be followed by a :${method} e.g. :ref, :copy, etc
-    Parameters can point to both Workflow and Component instances. Parameters which reference Blueprint instances
+    Parameters can point to both Workflow and Component instances. Parameters which reference Template instances
     **must not** appear in fields other than command.arguments
      If a Parameter references a Workflow instance,
        the parameter **must** also be referenced "%(like-this)s/location/to/component/optional/path":${method}
@@ -1865,14 +1938,14 @@ def digest_dsl_component(
 
     Args:
         scope:
-            the component blueprint, its parameters to instantiate it, and its unique location (uid)
+            the component Template, its parameters to instantiate it, and its unique location (uid)
 
     Returns:
         Information necessary to produce FlowIR from a Component in the form of ComponentFlowIR and a collection of
         errors. If there's more than 1 error, the information in the ComponentFlowIR may be incomplete
     """
-    if not isinstance(scope.blueprint, Component):
-        exc = ValueError(f"Node {scope.location} was expected to be a Component not a {scope.blueprint}")
+    if not isinstance(scope.template, Component):
+        exc = ValueError(f"Node {scope.location} was expected to be a Component not a {scope.template}")
         exc = experiment.model.errors.DSLInvalidFieldError(location=scope.dsl_location(), underlying_error=exc)
 
         return ComponentFlowIR(
@@ -1886,7 +1959,7 @@ def digest_dsl_component(
 
     pattern_parameter = re.compile(ParameterPattern)
 
-    check_environment = scope.blueprint.command.environment
+    check_environment = scope.template.command.environment
     if (
         isinstance(check_environment, str)
         and pattern_parameter.fullmatch(check_environment)

@@ -55,6 +55,7 @@ entrypoint: # describes how to run this namespace
 workflows: # Available Workflow Classes
   - signature: # Identical to the schema of a signature in a Component class
       name: the-identifier-of-the-class
+      description: an optional description of the workflow
       parameters:
         - name: parameter-name
           default: an optional default value (string)
@@ -80,6 +81,7 @@ workflows: # Available Workflow Classes
 components: # Available Component Classes
   - signature: # identical to the schema of a signature in a Workflow class
       name: the identifier of the class
+      description: an optional description of the component
       parameters:
         - name: parameter name
           default: an optional default value (string or dictionary)
@@ -280,6 +282,12 @@ class Signature(pydantic.BaseModel):
         # VV: Names cannot end in digits - FlowIR has a special meaning for digits at the end of component names
         regex=SignatureNamePattern
     )
+
+    description: typing.Optional[str] = pydantic.Field(
+        None,
+        description="The description of the template",
+    )
+
     parameters: typing.List[Parameter] = pydantic.Field(
         description="The collection of the parameters to the template"
     )

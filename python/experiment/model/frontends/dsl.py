@@ -1315,18 +1315,29 @@ class ScopeStack:
             Enter = "enter"
             Exit = "exit"
 
+        dsl_error = experiment.model.errors.DSLInvalidError([])
+
+        try:
+            initial_template = namespace.get_template(namespace.entrypoint.entryInstance)
+        except Exception as e:
+            dsl_error.underlying_errors.append(
+                experiment.model.errors.DSLInvalidFieldError(
+                    location=["entrypoint", "execute", 0, "target"],
+                    underlying_error=e
+                )
+            )
+            return dsl_error.underlying_errors
+
         remaining_scopes: typing.List[typing.Tuple[Action, ScopeStack.Scope]] = [
             (
                 Action.Enter,
                 ScopeStack.Scope(
                     location=["entry-instance"],
-                    template=namespace.get_template(namespace.entrypoint.entryInstance),
+                    template=initial_template,
                     parameters=namespace.entrypoint.execute[0].args,
                 )
             )
         ]
-
-        dsl_error = experiment.model.errors.DSLInvalidError([])
 
         rg_param = re.compile(ParameterPattern)
         while remaining_scopes:

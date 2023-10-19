@@ -163,7 +163,7 @@ class FlowIRSyntaxException(FlowException):
 
 
 class DSLInvalidFieldError(Exception):
-    def __init__(self, location: typing.List[str], underlying_error: Exception):
+    def __init__(self, location: typing.List[typing.Union[str, int]], underlying_error: Exception):
         self.location = location
         self.underlying_error = underlying_error
 

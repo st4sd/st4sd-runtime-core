@@ -1305,7 +1305,11 @@ class ScopeStack:
 
         return []
 
-    def _seed_all_scopes(self, namespace: Namespace) -> typing.List[Exception]:
+    def discover_all_instances_of_templates(
+        self,
+        namespace: Namespace,
+        override_entrypoint_args: typing.Optional[typing.Dict[str, ParameterValueType]] = None,
+    ):
         """Utility method to visit all Workflows and Components which are reachable from the Entrypoint and seed
         the ScopeStack with 1 scope for each visited template
 
@@ -1315,8 +1319,12 @@ class ScopeStack:
             namespace:
                 The namespace to walk
 
-        Returns:
-            An array of errors
+            override_entrypoint_args:
+                Overrides the arguments of the entrypoint
+
+        Raises:
+            experiment.model.errors.DSLInvalidError:
+                If the template that the entrypoint points to contains grammar errors
         """
         import enum
         class Action(str, enum.Enum):
@@ -1334,7 +1342,7 @@ class ScopeStack:
                     underlying_error=e
                 )
             )
-            return dsl_error.underlying_errors
+            raise dsl_error
 
         remaining_scopes: typing.List[typing.Tuple[Action, ScopeStack.Scope]] = [
             (
@@ -1342,7 +1350,7 @@ class ScopeStack:
                 ScopeStack.Scope(
                     location=["entry-instance"],
                     template=initial_template,
-                    parameters=namespace.entrypoint.execute[0].args,
+                    parameters=override_entrypoint_args or namespace.entrypoint.execute[0].args,
                 )
             )
         ]
@@ -1403,8 +1411,22 @@ class ScopeStack:
 
             if isinstance(scope.template, Workflow):
                 children_scopes = []
+
+                instantiated_steps = []
+
                 for idx, execute in enumerate(scope.template.execute):
+                    execute = typing.cast(ExecuteStep, execute)
                     child_location = location + [execute.get_target()]
+
+                    if execute.get_target() in instantiated_steps:
+                        dsl_error.underlying_errors.append(
+                            experiment.model.errors.DSLInvalidFieldError(
+                                location=scope.dsl_location() + ["execute", idx],
+                                underlying_error=KeyError(f"Node {child_location} has already been instantiated")
+                            )
+                        )
+                    else:
+                        instantiated_steps.append(execute.get_target())
 
                     try:
                         template_name = scope.template.steps[execute.get_target()]
@@ -1440,29 +1462,62 @@ class ScopeStack:
                         children_scopes.append((Action.Enter, new_scope))
                     else:
                         children_scopes.insert(0, (Action.Enter, new_scope))
+                missing_steps = [x for x in scope.template.steps if x not in instantiated_steps]
+
+                for missing in missing_steps:
+                    dsl_error.underlying_errors.append(
+                        experiment.model.errors.DSLInvalidFieldError(
+                            location=scope.dsl_location() + ["execute"],
+                            underlying_error=KeyError(f"Workflow {scope.location[:-1]} does not contain an execute "
+                                                      f"entry for its step {missing}")
+                        )
+                    )
 
                 remaining_scopes = children_scopes + remaining_scopes
             elif isinstance(scope.template, Component):
                 pass
             else:
-                location = '\n'.join(location)
-                raise NotImplementedError(f"Cannot visit location {location} for Node", scope)
+                location = '\\'.join(location)
+                dsl_error.underlying_errors.append(
+                    experiment.model.errors.DSLInvalidFieldError(
+                        location=scope.dsl_location(),
+                        underlying_error=NotImplementedError(f"Cannot visit location {location} for Node", scope)
+                    )
+                )
 
-        return dsl_error.underlying_errors
+        if dsl_error.underlying_errors:
+            raise dsl_error
 
     @classmethod
-    def from_namespace(cls, namespace: Namespace) -> "ScopeStack":
+    def from_namespace(
+        cls,
+        namespace: Namespace,
+        override_entrypoint_args: typing.Optional[typing.Dict[str, ParameterValueType]] = None,
+    ) -> "ScopeStack":
+        """Instantiates a ScopeStack from a Namespace
+
+        Args:
+            namespace:
+                The namespace to ingest
+
+            override_entrypoint_args:
+                Overrides the arguments of the entrypoint
+
+        Returns:
+            A populated ScopeStack
+
+        Raises:
+            experiment.model.errors.DSLInvalidError:
+                If the template that the entrypoint points to contains grammar errors
+        """
         scope_stack = cls()
 
-        errors = scope_stack._seed_all_scopes(namespace=namespace)
+        scope_stack.discover_all_instances_of_templates(
+            namespace=namespace,
+            override_entrypoint_args=override_entrypoint_args
+        )
 
-        if errors:
-            exc = experiment.model.errors.DSLInvalidError.from_errors(errors)
-            # print(exc)
-            raise exc
-
-        # VV: TODO now find references to the env-vars by visiting the fields of the component
-        # if any field other than `command.environment` references a dictionary record an error
+        errors = []
 
         def resolve_scope(
             scope: ScopeStack.Scope,
@@ -1794,7 +1849,10 @@ def auto_generate_entrypoint(
 
 
 
-def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flowir.FlowIRConcrete:
+def namespace_to_flowir(
+    namespace: Namespace,
+    override_entrypoint_args: typing.Optional[typing.Dict[str, ParameterValueType]] = None,
+) -> experiment.model.frontends.flowir.FlowIRConcrete:
     """Converts a Namespace to flowir
 
     Algorithm:
@@ -1815,7 +1873,10 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
        DSL 2 Namespace uses as parameters.
 
     Args:
-        namespace: the namespace to convert
+        namespace:
+            the namespace to convert
+        override_entrypoint_args:
+                Overrides the arguments of the entrypoint
 
     Returns:
         A FlowIRConcrete instance
@@ -1831,7 +1892,10 @@ def namespace_to_flowir(namespace: Namespace) -> experiment.model.frontends.flow
     namespace = namespace.copy(deep=True)
     auto_generate_entrypoint(namespace)
 
-    scopes =  ScopeStack.from_namespace(namespace)
+    scopes =  ScopeStack.from_namespace(
+        namespace=namespace,
+        override_entrypoint_args=override_entrypoint_args
+    )
 
     components: typing.Dict[typing.Tuple[str], ComponentFlowIR] = {}
     errors = []

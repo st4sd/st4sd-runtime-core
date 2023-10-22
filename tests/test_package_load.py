@@ -22,34 +22,14 @@ import pytest
 
 from . import utils
 
+from .test_dsl import (dsl_one_workflow_one_component_one_step_no_datareferences)
+
 logger = logging.getLogger('test')
 
 
-def test_load_dsl2(output_dir):
-    dsl = experiment.model.frontends.dsl.Namespace(**yaml.safe_load("""
-    entrypoint:
-      entry-instance: main
-      execute:
-      - target: <entry-instance>
-    workflows:
-    - signature:
-        name: main
-        parameters: []
-      steps:
-        hello: echo
-      execute:
-      - target: <hello>
-        args:
-          message: hello world
-    components:
-    - signature:
-        name: echo
-        parameters:
-        - name: message
-      command:
-        executable: echo
-        arguments: "%(message)s"
-    """)).dict(by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True)
+def test_load_dsl2(output_dir, dsl_one_workflow_one_component_one_step_no_datareferences):
+    dsl = experiment.model.frontends.dsl.Namespace(**dsl_one_workflow_one_component_one_step_no_datareferences)\
+        .dict(by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True)
 
     pkg_dir = os.path.join(output_dir, "workflow.package")
     utils.populate_files(pkg_dir, {"conf/dsl.yaml": yaml.safe_dump(dsl)})
@@ -63,6 +43,42 @@ def test_load_dsl2(output_dir):
 
     # VV: Now make sure that the package is valid - perform check_executable checks too
     compExperiment.validateExperiment(ignoreTestExecutablesError=False)
+
+
+def test_load_dsl2_with_user_variables(
+    output_dir,
+    dsl_one_workflow_one_component_one_step_no_datareferences
+):
+    dsl = experiment.model.frontends.dsl.Namespace(**dsl_one_workflow_one_component_one_step_no_datareferences)\
+        .dict(by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True)
+
+    pkg_dir = os.path.join(output_dir, "workflow.package")
+    utils.populate_files(pkg_dir, {"conf/dsl.yaml": yaml.safe_dump(dsl)})
+    utils.populate_files(output_dir, {"variables.yaml": yaml.safe_dump({
+        "global": {
+            "foo": "from a user variable"
+        }
+    })})
+
+    instance_dir = os.path.join(output_dir, "package.instance")
+    os.makedirs(instance_dir)
+    isValid, error, compExperiment = experiment.test.ValidatePackage(
+        pkg_dir, location=instance_dir, variables=os.path.join(output_dir, "variables.yaml")
+    )
+
+    assert isValid
+    assert error is None
+
+    # VV: Now make sure that the package is valid - perform check_executable checks too
+    compExperiment.validateExperiment(ignoreTestExecutablesError=False)
+
+    concrete = compExperiment.configuration.get_flowir_concrete()
+
+    # VV: This is the meat of this unit-test. We want to see the custom value here
+    assert concrete.raw()["variables"]["default"]["global"] == {
+        "foo": "from a user variable"
+    }
+
 
 def test_load_yaml_with_special_folders(output_dir):
     tempdir = tempfile.gettempdir()

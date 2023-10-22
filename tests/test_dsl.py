@@ -11,6 +11,7 @@ import experiment.model.frontends.dsl
 import experiment.model.frontends.flowir
 import experiment.model.graph
 
+import experiment.model.errors
 
 @pytest.fixture()
 def simple_flowir() -> experiment.model.frontends.flowir.DictFlowIR:
@@ -881,3 +882,24 @@ def test_dsl2_single_workflow_one_component_two_steps_with_edges(
 
     errors = flowir.validate()
     assert len(errors) == 0
+
+
+def test_dsl2_extra_arguments(
+    dsl_one_workflow_one_component_two_steps_with_edges: typing.Dict[str, typing.Any]
+):
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl_one_workflow_one_component_two_steps_with_edges)
+
+    print(yaml.safe_dump(namespace.dict(exclude_unset=True, exclude_none=True, exclude_defaults=True, by_alias=True),
+        sort_keys=False))
+
+    with pytest.raises(experiment.model.errors.DSLInvalidError) as e:
+        experiment.model.frontends.dsl.namespace_to_flowir(namespace, override_entrypoint_args={
+            "foo": "this is ok",
+            "bar": "this should raise an exception",
+        })
+
+    exc = e.value
+
+    assert len(exc.underlying_errors) == 1
+    assert str(exc.underlying_errors[0].underlying_error) == "Unknown parameter bar"
+    assert exc.underlying_errors[0].parameter_name == "bar"

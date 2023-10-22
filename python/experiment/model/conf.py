@@ -1406,16 +1406,15 @@ class DSLExperimentConfiguration(FlowIRExperimentConfiguration):
     def _path_to_main_file(cls, root_directory, is_instance, **kwargs):
         if is_instance is True:
             return None
-
+        # VV: Technically the instance file should contain the Namespace of the package file but with its
+        # entrypoint updated with the global variables from the user variables file(s).
         main_file = kwargs.get('dsl_file', 'dsl.yaml')
         return os.path.join(root_directory, 'conf', main_file)
 
     def __init__(
             self,
             path: Optional[str],
-            platform: Optional[str],
             variable_files: Optional[List[str]],
-            system_vars: Optional[Dict[str, str]],
             is_instance: bool,
             createInstanceFiles: bool,
             primitive: bool,
@@ -1423,9 +1422,49 @@ class DSLExperimentConfiguration(FlowIRExperimentConfiguration):
             variable_substitute: bool = True,
             manifest: "Optional[DictManifest]" = None,
             validate: bool = True,
-            config_patches: Optional[Dict[int, List[str]]] = None,
             expand_references: bool = True,
             **kwargs):
+        """Initializes and then optionally validates a package configuration from a DSL 2.0 definition
+
+
+        Args:
+            path:
+                Path to workflow definition. Can be a directory, a file, or None if workflow definition
+                is stored entirely in memory
+            variable_files:
+                Instance specific variable file(s). If multiple files are provided then they are layered
+                starting from the first and working towards the last. This means that the value of a variable that
+                 exists in multiple layers will be the one that the last layer defines.
+            is_instance:
+                Indicates whether to load the Instance flavour of the Experiment instead of the Package one
+            createInstanceFiles:
+                If set to True will auto-generate instance files provided that they do not
+                already exist. Set updateInstanceFiles to True too to update existing files.
+            primitive:
+                If true will not perform replication, otherwise will replicate components following the
+                workflowAttributes.replicate rules
+            updateInstanceFiles:
+                Set to true to update instance files if they already exist
+            variable_substitute:
+                Whether to perform variable substitution, optional for a primitive graph
+                but required for a replicated one
+            manifest:
+                The manifest is a dictionary, with targetFolder: sourceFolder entries. Each
+                sourceFolder will be copied or linked to populate the respective targetFolder. Source folders can be
+                absolute paths, or paths relative to the path of the FlowIR YAML file. SourceFolders may also be
+                suffixed with :copy or :link to control whether targetFolder will be copied or linked to sourceFolder
+                (default is copy). TargetFolders are interpreted as relative paths under the instance directory. They
+                may also be the resulting folder name of some applicationDependency. They may include a path-separator
+                (.e.g /) but must not be absolute paths.
+            validate:
+                When True this method will raise exception if configuration is invalid or missing
+                expand_references: Whether to expand component references to their absolute string representation
+
+        Raises:
+            experiment.errors.ExperimentInvalidConfigurationError:  If the configuration fails the validation checks
+            experiments.errors.ExperimentMissingConfigurationError: If configuration does not exist and validate is True
+        """
+
         import experiment.model.frontends.dsl
         dsl_path = path
         if os.path.isdir(path):
@@ -1436,13 +1475,40 @@ class DSLExperimentConfiguration(FlowIRExperimentConfiguration):
 
         self.dsl_namespace = experiment.model.frontends.dsl.Namespace(**dictionary)
 
-        concrete = experiment.model.frontends.dsl.namespace_to_flowir(self.dsl_namespace)
+        override_entrypoint_args = None
+
+        if variable_files:
+            # VV: If there're variable files then load them, and then use them to override the parameters
+            # of the entry-instance step in the entrypoint
+            # We need to do this step before we executing namespace_to_flowir() because that method replaces all
+            # variable references with the values of said variables.
+            variables = self.layer_many_variable_files(variable_files)
+
+            # VV: There's no guarantee that this DSL is correct so be careful accessing the entrypoint
+            try:
+                initial_template = self.dsl_namespace.get_template(self.dsl_namespace.entrypoint.entryInstance)
+            except Exception as e:
+                if validate:
+                    raise experiment.model.errors.DSLInvalidError([
+                        experiment.model.errors.DSLInvalidFieldError(
+                            location=["entrypoint", "entry-instance"],
+                            underlying_error=e
+                        )
+                    ])
+            else:
+                if isinstance(variables.get("global"), dict):
+                    # VV: Start with arguments in the entrypoint, then fill in those from the user variables
+                    override_entrypoint_args = (self.dsl_namespace.entrypoint.execute[0].args or {}).copy()
+                    override_entrypoint_args.update({name: value for name, value in variables["global"].items()})
+
+        concrete = experiment.model.frontends.dsl.namespace_to_flowir(
+            namespace=self.dsl_namespace,
+            override_entrypoint_args=override_entrypoint_args
+        )
 
         super().__init__(
             path=path,
-            platform=platform,
             variable_files=variable_files,
-            system_vars=system_vars,
             is_instance=is_instance,
             createInstanceFiles=createInstanceFiles,
             primitive=primitive,
@@ -1450,7 +1516,6 @@ class DSLExperimentConfiguration(FlowIRExperimentConfiguration):
             variable_substitute=variable_substitute,
             manifest=manifest,
             validate=validate,
-            config_patches=config_patches,
             expand_references=expand_references,
             concrete=concrete,
             file_format="dsl",

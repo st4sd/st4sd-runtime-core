@@ -249,7 +249,8 @@ class Parameter(pydantic.BaseModel):
         extra = "forbid"
 
     name: str = pydantic.Field(
-        description="The name of the parameter, must be unique in the parent Signature"
+        description="The name of the parameter, must be unique in the parent Signature",
+        min_length=1
     )
     default: typing.Optional[ParameterValueType] = pydantic.Field(
         description="The default value of the parameter",
@@ -1004,7 +1005,8 @@ class ScopeStack:
                     dsl_error.underlying_errors.append(
                         experiment.model.errors.DSLInvalidFieldError(
                             location=caller_location,
-                            underlying_error=ValueError(f"Unknown parameter {name}")
+                            underlying_error=ValueError(f"Unknown parameter {name}"),
+                            parameter_name=name,
                         )
                     )
 
@@ -1338,7 +1340,7 @@ class ScopeStack:
         except Exception as e:
             dsl_error.underlying_errors.append(
                 experiment.model.errors.DSLInvalidFieldError(
-                    location=["entrypoint", "execute", 0, "target"],
+                    location=["entrypoint", "entry-instance"],
                     underlying_error=e
                 )
             )
@@ -1368,6 +1370,18 @@ class ScopeStack:
                 break
 
             remaining_scopes.insert(0, (Action.Exit, scope))
+
+            scope_param_names = set()
+
+            for idx, p in enumerate(scope.template.signature.parameters):
+                if p.name in scope_param_names:
+                    dsl_error.underlying_errors.append(
+                        experiment.model.errors.DSLInvalidFieldError(
+                            location=scope.dsl_location() + ["signature", "parameters", idx, "name"],
+                            underlying_error=ValueError(f"Multiple definitions of parameter {p.name}")
+                        )
+                    )
+                scope_param_names.add(p.name)
 
             location = self.get_location()
             if location != ["entry-instance"]:

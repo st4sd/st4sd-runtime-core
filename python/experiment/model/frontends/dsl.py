@@ -1030,7 +1030,7 @@ class ScopeStack:
             all_scopes: typing.Dict[typing.Tuple[str], "ScopeStack.Scope"]
         ) -> typing.List[Exception]:
             errors: typing.List[Exception] = []
-            for name, value in self.parameters.items():
+            for idx, (name, value) in enumerate(self.parameters.items()):
                 try:
                     self.parameters[name] = replace_parameter_references(
                         location=self.location,
@@ -1041,7 +1041,7 @@ class ScopeStack:
                 except ValueError as e:
                     errors.append(
                         experiment.model.errors.DSLInvalidFieldError(
-                            location=self.dsl_location(),
+                            location=self.dsl_location() + ["signature", "parameters", idx],
                             underlying_error=e
                         )
                     )
@@ -1054,18 +1054,18 @@ class ScopeStack:
             ensure_references_point_to_sibling_steps: bool,
         ) -> typing.List[Exception]:
             errors: typing.List[Exception] = []
-            for name, value in self.parameters.items():
+            for idx, (name, value) in enumerate(self.parameters.items()):
                 try:
                     self.parameters[name] = self.replace_step_references(
                         value=value,
-                        field=["signature", "parameters", name],
+                        field=["signature", "parameters", idx],
                         all_scopes=all_scopes,
                         ensure_references_point_to_sibling_steps=ensure_references_point_to_sibling_steps,
                     )
                 except ValueError as e:
                     errors.append(
                         experiment.model.errors.DSLInvalidFieldError(
-                            location=self.dsl_location(),
+                            location=self.dsl_location() + ["signature", "parameters", idx],
                             underlying_error=e
                         )
                     )
@@ -1075,7 +1075,7 @@ class ScopeStack:
                 except ValueError as e:
                     errors.append(
                         experiment.model.errors.DSLInvalidFieldError(
-                            location=self.dsl_location(),
+                            location=self.dsl_location() + ["signature", "parameters", idx],
                             underlying_error=e
                         )
                     )
@@ -1087,13 +1087,13 @@ class ScopeStack:
             all_scopes: typing.Dict[typing.Tuple[str], "ScopeStack.Scope"],
         ) -> typing.List[Exception]:
             errors: typing.List[Exception] = []
-            for name, value in self.parameters.items():
+            for idx, (name, value) in enumerate(self.parameters.items()):
                 try:
                     self.parameters[name] = self.replace_revamped_references(value=value)
                 except ValueError as e:
                     errors.append(
                         experiment.model.errors.DSLInvalidFieldError(
-                            location=self.dsl_location(),
+                            location=self.dsl_location() + ["signature", "parameters", idx],
                             underlying_error=e
                         )
                     )
@@ -1171,15 +1171,16 @@ class ScopeStack:
 
                 try:
                     parent_scope = all_scopes[uid_parent]
+                    parent_location = parent_scope.dsl_location()
                 except KeyError:
                     raise experiment.model.errors.DSLInvalidFieldError(
-                        location=["workflows", parent_workflow_name],
+                        location=["workflows", "?"],
                         underlying_error=ValueError(f"Unable to identify the parent Workflow of {self.location}")
                     )
 
                 if not isinstance(parent_scope.template, Workflow):
                     raise experiment.model.errors.DSLInvalidFieldError(
-                        location=["workflows", parent_workflow_name],
+                        location=parent_location,
                         underlying_error=ValueError(
                             f"The parent of {self.location} is not a Workflow but a {type(parent_scope)}")
                     )
@@ -1455,7 +1456,7 @@ class ScopeStack:
 
                     try:
                         template = namespace.get_template(template_name)
-                    except KeyError as e:
+                    except KeyError:
                         dsl_error.underlying_errors.append(
                             experiment.model.errors.DSLInvalidFieldError(
                                 location=scope.dsl_location() + ["execute", idx],
@@ -1622,7 +1623,8 @@ class ComponentFlowIR:
 
     def convert_outputreferences_to_datareferences(
         self,
-        uid_to_name: typing.Dict[typing.Tuple[str], typing.Tuple[int, str]]
+        uid_to_name: typing.Dict[typing.Tuple[str], typing.Tuple[int, str]],
+            location: typing.List[typing.Union[str, int]],
     ):
         """Utility method to convert OutputReference instances into Legacy DataReferences
 
@@ -1632,6 +1634,8 @@ class ComponentFlowIR:
             uid_to_name:
                 A key: value dictionary where keys are scope locations and values are the names of the associated
                 component instances in the FlowIR domain
+            location:
+                The path to the DSL field for the component template
         """
         if "references" not in self.flowir:
             self.flowir["references"] = []
@@ -1666,7 +1670,7 @@ class ComponentFlowIR:
                                  f"end with a :$method suffix.")
                 )
 
-        for name, value in self.scope.parameters.items():
+        for idx, (name, value) in enumerate(self.scope.parameters.items()):
             if not isinstance(value, str):
                 continue
             for match in pattern_output.finditer(value):
@@ -1683,9 +1687,11 @@ class ComponentFlowIR:
                         ]:
                             break
                     else:
-                        raise experiment.model.errors.DSLInvalidFieldError(
-                            location=[
-                                "components", self.scope.template.signature.name, "signature", "parameters", name
+                        dsl_location = self.scope.dsl_location()
+
+                        err = experiment.model.errors.DSLInvalidFieldError(
+                            location=dsl_location + [
+                                "signature", "parameters", idx, name
                             ],
                             underlying_error=ValueError(
                                 f"The parameter {name}={value} of the Component {self.scope.location} "
@@ -1693,6 +1699,7 @@ class ComponentFlowIR:
                                 f"cannot be inferred from the field command.arguments={args}"
                             )
                         )
+                        self.errors.append(err)
 
         for match in pattern_legacy.finditer(args):
             arguments_legacy.add(match.group(0))
@@ -1718,13 +1725,16 @@ class ComponentFlowIR:
             try:
                 producer, fileref = ref.split(scopes=uid_to_name)
             except ValueError:
-                raise experiment.model.errors.DSLInvalidFieldError(
-                    location=self.scope.dsl_location(),
-                    underlying_error=ValueError(
-                        f"The Component {self.scope.location} contains the reference {ref_str} which does not "
-                        f"point to any known Components", uid_to_name
+                self.errors.append(
+                    experiment.model.errors.DSLInvalidFieldError(
+                        location=self.scope.dsl_location(),
+                        underlying_error=ValueError(
+                            f"The Component {self.scope.location} contains the reference {ref_str} which does not "
+                            f"point to any known Components", uid_to_name
+                        )
                     )
                 )
+                continue
             stage, producer = uid_to_name[producer]
 
             producer = f"stage{stage}.{producer}"
@@ -1994,10 +2004,19 @@ def namespace_to_flowir(
     # VV: After resolving the parameters, handle OutputReferences and Legacy DataReferences. This step **must**
     # happen after resolving the parameters as the OutputReferences and Legacy DataReferences may be
     # constructed inside the arguments by combining the values of 1 or more parameters with 0 or more literal strings
-    for _, comp in components.items():
-        comp.convert_outputreferences_to_datareferences(uid_to_name)
+    uncaught_errors = []
+    for scope_loc, comp in components.items():
+        scope_location = []
+        try:
+            comp_scope = scopes.scopes[scope_loc]
+            scope_location = comp_scope.dsl_location()
+            comp.convert_outputreferences_to_datareferences(uid_to_name, location=scope_location)
+        except Exception as e:
+            uncaught_errors.append(experiment.model.errors.DSLInvalidFieldError(
+                location=scope_location, underlying_error=e
+            ))
 
-    all_errors = sum([comp.errors for comp in components.values()], [])
+    all_errors = sum([comp.errors for comp in components.values()], []) + uncaught_errors
     if all_errors:
         raise experiment.model.errors.DSLInvalidError.from_errors(all_errors)
 
@@ -2067,7 +2086,7 @@ def digest_dsl_component(
             exc = ValueError(f"The Component {scope.location} uses the parameter {param_name} to set its"
                                      f"environment, but the component does not have such a parameter")
             exc = experiment.model.errors.DSLInvalidFieldError(
-                location=scope.dsl_location() + ["signature", "environment"], underlying_error=exc)
+                location=scope.dsl_location() + ["command", "environment"], underlying_error=exc)
             errors.append(exc)
 
         check_environment = scope.parameters[param_name]
@@ -2083,7 +2102,7 @@ def digest_dsl_component(
                                  f"key: value env-vars, be unset, or the string literal \"none\". However it is "
                                  f"{check_environment}")
         exc = experiment.model.errors.DSLInvalidFieldError(
-            location=scope.dsl_location() + ["signature", "environment"], underlying_error=exc)
+            location=scope.dsl_location() + ["command", "environment"], underlying_error=exc)
         errors.append(exc)
 
     ret = ComponentFlowIR(

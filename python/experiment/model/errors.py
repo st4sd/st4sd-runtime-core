@@ -173,10 +173,30 @@ class DSLInvalidFieldError(Exception):
     def __str__(self):
         return "DSL Error at " + "/".join(map(str, self.location)) + ": " + str(self.underlying_error)
 
+    def pretty_error(self) -> typing.Dict[str, typing.Any]:
+        err = {
+            "loc": list(self.location),
+            "msg": str(self.underlying_error),
+        }
+
+        # VV: KeyError quotes str(KeyError) in '
+        if (
+            (err['msg'].startswith('"') and err['msg'].endswith('"'))
+            or (err['msg'].startswith("'") and err['msg'].endswith("'"))
+        ):
+            err['msg'] = err['msg'][1:-1]
+
+        try:
+            err["type"] = self.type
+        except AttributeError:
+            pass
+
+        return err
+
 
 class DSLInvalidError(FlowIRException):
     def __init__(self, underlying_errors: typing.List[DSLInvalidFieldError]):
-        self.underlying_errors = underlying_errors
+        self.underlying_errors: typing.List[DSLInvalidFieldError] = underlying_errors
 
     def __str__(self):
         return f"DSL contains {len(self.underlying_errors)} error(s):\n" + "\n".join(map(str, self.underlying_errors))
@@ -185,12 +205,7 @@ class DSLInvalidError(FlowIRException):
         return str(self)
 
     def errors(self) -> typing.List[typing.Dict[str, typing.Any]]:
-        return [
-            {
-                "location": e.location,
-                "error": str(e.underlying_error)
-            } for e in self.underlying_errors
-        ]
+        return [e.pretty_error() for e in self.underlying_errors]
 
     @classmethod
     def from_errors(cls, errors: List[Union[DSLInvalidFieldError, Exception]]):

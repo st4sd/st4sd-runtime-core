@@ -257,22 +257,6 @@ class Parameter(pydantic.BaseModel):
     )
 
 
-class InstantiatedParameter(Parameter):
-    value: typing.Optional[ParameterValueType] = pydantic.Field(
-        description="The value of the parameter, if unset defaults to @default"
-    )
-
-    def get_value(self) -> typing.Optional[ParameterValueType]:
-        """The value of the parameter, if unset defaults to @default
-
-        Returns:
-            The value of the parameter, if unset defaults to @default
-        """
-        if 'value' in self.__fields_set__:
-            return self.value
-        return self.default
-
-
 class Signature(pydantic.BaseModel):
     class Config:
         extra = "forbid"
@@ -290,19 +274,7 @@ class Signature(pydantic.BaseModel):
     )
 
     parameters: typing.List[Parameter] = pydantic.Field(
-        description="The collection of the parameters to the template"
-    )
-
-
-class InstantiatedSignature(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
-
-    name: str = pydantic.Field(
-        description="The name of the template, must be unique in the parent namespace"
-    )
-    parameters: typing.List[InstantiatedParameter] = pydantic.Field(
-        description="The collection of the parameters to the template"
+        [], description="The collection of the parameters to the template"
     )
 
 
@@ -315,8 +287,8 @@ class ExecuteStep(pydantic.BaseModel):
         regex=fr"<{StepNamePattern}>",
     )
 
-    args: typing.Optional[typing.Dict[str, ParameterValueType]] = pydantic.Field(
-        None, description="How to assign values to the parameters of the step. "
+    args: typing.Dict[str, ParameterValueType] = pydantic.Field(
+        {}, description="How to assign values to the parameters of the step. "
                           "Each entry is a key: value pair where the key is the name of a step parameter "
                           "and the value the desired value of the step parameter",
     )
@@ -971,19 +943,20 @@ class ScopeStack:
             self,
             location: typing.List[str],
             parameters: typing.Dict[str, ParameterValueType],
-            template: typing.Union[Workflow, Component]
+            template: typing.Union[Workflow, Component],
+            dsl_location: typing.List[typing.Union[str, int]]
         ):
             self.location = location
             self.parameters = parameters or {}
-            self.template = template.copy(deep=True)
+            self.template: typing.Union[Workflow, Component] = template.copy(deep=True)
+            self._dsl_location = list(dsl_location)
+
+        def dsl_location(self) -> typing.List[typing.Union[str, int]]:
+            return list(self._dsl_location)
 
         @property
         def name(self) -> str:
             return self.location[-1]
-
-        def dsl_location(self) -> typing.List[str]:
-            bp_type = "workflows" if isinstance(self.template, Workflow) else "components"
-            return [bp_type, self.template.signature.name]
 
         def verify_parameters(self, caller_location: experiment.model.errors.DSLLocation):
             """Utility method to verify the parameters of a scope
@@ -1240,7 +1213,8 @@ class ScopeStack:
             self,
             name: str,
             parameters: typing.Dict[str, ParameterValueType],
-            template: typing.Union[Workflow, Component]
+            template: typing.Union[Workflow, Component],
+            dsl_location: typing.List[typing.Union[str, int]]
     ):
         parameters = copy.deepcopy(parameters)
         errors = []
@@ -1251,7 +1225,12 @@ class ScopeStack:
         if uid in self.scopes:
             errors.append(ValueError(f"Node has already been visited", location))
 
-        scope_entry = ScopeStack.Scope(location=location, parameters=parameters, template=template)
+        scope_entry = ScopeStack.Scope(
+            location=location,
+            parameters=parameters,
+            template=template,
+            dsl_location=dsl_location
+        )
 
         for p in template.signature.parameters:
             if p.name in parameters:
@@ -1347,11 +1326,36 @@ class ScopeStack:
             )
             raise dsl_error
 
+        if isinstance(initial_template, Workflow):
+            for (idx, wf) in enumerate(namespace.workflows):
+                if wf.signature.name == initial_template.signature.name:
+                    dsl_location = ["workflows", idx]
+                    break
+            else:
+                raise experiment.model.errors.DSLInvalidError.from_errors([
+                    KeyError(f"entrypoint points to unknown Workflow {initial_template}")
+                ])
+        elif isinstance(initial_template, Component):
+            for (idx, comp) in enumerate(namespace.components):
+                if comp.signature.name == initial_template.signature.name:
+                    dsl_location = ["components", idx]
+                    break
+            else:
+                raise experiment.model.errors.DSLInvalidError.from_errors([
+                    KeyError(f"entrypoint points to unknown Component {initial_template}")
+                ])
+        else:
+            raise experiment.model.errors.DSLInvalidError.from_errors([
+                NotImplementedError(f"entrypoint points to unsupported template type {initial_template}")
+            ])
+
+
         remaining_scopes: typing.List[typing.Tuple[Action, ScopeStack.Scope]] = [
             (
                 Action.Enter,
                 ScopeStack.Scope(
                     location=["entry-instance"],
+                    dsl_location=dsl_location,
                     template=initial_template,
                     parameters=override_entrypoint_args or namespace.entrypoint.execute[0].args,
                 )
@@ -1364,8 +1368,17 @@ class ScopeStack:
             if action == Action.Exit:
                 self.exit()
                 continue
+
             try:
-                scope = self.enter(name=scope.name, parameters=scope.parameters, template=scope.template)
+                scope = self.enter(
+                    name=scope.name,
+                    parameters=scope.parameters,
+                    template=scope.template,
+                    dsl_location=scope.dsl_location()
+                )
+            except experiment.model.errors.DSLInvalidFieldError as e:
+                dsl_error.underlying_errors.append(e)
+                break
             except experiment.model.errors.DSLInvalidError as e:
                 dsl_error.underlying_errors += e.underlying_errors
                 break
@@ -1454,6 +1467,19 @@ class ScopeStack:
                         )
                         continue
 
+                    # VV: The DSL has a cycle in it if this scope is about to use a template that has already been used
+                    # to form one of the upstream nodes
+                    try:
+                        for predecessor in self.stack:
+                            if predecessor.template.signature.name == template_name:
+                                raise experiment.model.errors.DSLInvalidFieldError(
+                                        location=scope.dsl_location() + ["execute", idx],
+                                        underlying_error=ValueError("The computational graph contains a cycle")
+                                    )
+                    except experiment.model.errors.DSLInvalidFieldError as e:
+                        dsl_error.underlying_errors.append(e)
+                        continue
+
                     try:
                         template = namespace.get_template(template_name)
                     except KeyError:
@@ -1469,6 +1495,7 @@ class ScopeStack:
 
                     new_scope = ScopeStack.Scope(
                         location=scope.location + [execute.get_target()],
+                        dsl_location=scope.dsl_location() + ["execute", idx],
                         parameters=parameters,
                         template=template,
                     )

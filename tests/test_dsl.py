@@ -657,6 +657,49 @@ components:
     """)
 
 
+@pytest.fixture()
+def dsl_with_cycle() -> typing.Dict[str, typing.Any]:
+    return yaml.safe_load("""
+    entrypoint:
+      entry-instance: main
+      execute:
+      - target: <entry-instance>
+    
+    workflows:
+    - signature:
+        name: main
+    
+      steps:
+        cycle: main
+        message: echo
+      execute:
+      - target: <message>
+      - target: <cycle>
+    
+    components:
+    - signature:
+        name: echo
+      command:
+        executable: echo
+        arguments: hello world
+    """)
+
+
+def test_detect_cycle(dsl_with_cycle: typing.Dict[str, typing.Any]):
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl_with_cycle)
+    scopes = experiment.model.frontends.dsl.ScopeStack()
+
+
+    with pytest.raises(experiment.model.errors.DSLInvalidError) as e:
+        scopes.discover_all_instances_of_templates(namespace)
+
+    exc = e.value
+
+    assert len(exc.underlying_errors) == 1
+    assert str(exc.underlying_errors[0].underlying_error) == "The computational graph contains a cycle"
+    assert exc.underlying_errors[0].location == ["workflows", 0, "execute", 1]
+
+
 def test_output_reference_split():
     ref = experiment.model.frontends.dsl.OutputReference.from_str("<entry-instance/producer/outputs/msg.txt>:output")
     scopes = [("entry-instance",), ("entry-instance", "producer"), ("entry-instance", "consumer-wf"),

@@ -13,6 +13,8 @@ from typing import Dict
 import os
 
 import experiment.model.errors
+from pydantic import Field, ConfigDict
+from typing_extensions import Annotated
 
 
 class Orchestrator(pydantic.BaseModel):
@@ -21,24 +23,23 @@ class Orchestrator(pydantic.BaseModel):
     Use the load_settings_orchestrator() method to parse and validate settings (method raises errors that
     include information about offending environment variables)
     """
-    class Config:
-        extra = pydantic.Extra.forbid
+    model_config = ConfigDict(extra=pydantic.Extra.forbid)
 
-    workers_default_all: Optional[pydantic.conint(ge=1)] = pydantic.Field(
+    workers_default_all: Optional[Annotated[int, Field(ge=1)]] = pydantic.Field(
         None, description="If set, sets the default value to all worker polls. This will override the default of "
                           "other individual fields. Users can still override those defaults by specifying an explicit "
                           "value.")
-    workers_controller: Optional[pydantic.conint(ge=1)] = pydantic.Field(
+    workers_controller: Optional[Annotated[int, Field(ge=1)]] = pydantic.Field(
         40, description="Number of workers in the Controller threadPool")
-    workers_component_state: Optional[pydantic.conint(ge=1)] = pydantic.Field(
+    workers_component_state: Optional[Annotated[int, Field(ge=1)]] = pydantic.Field(
         50, description="Number of workers in the ComponentState threadPool")
-    workers_engine: Optional[pydantic.conint(ge=1)] = pydantic.Field(
+    workers_engine: Optional[Annotated[int, Field(ge=1)]] = pydantic.Field(
         50, description="Number of workers in the Engine threadPool")
-    workers_engine_trigger: Optional[pydantic.conint(ge=1)] = pydantic.Field(
+    workers_engine_trigger: Optional[Annotated[int, Field(ge=1)]] = pydantic.Field(
         20, description="Number of workers in the Engine threadPool that Engines use to trigger immediate emissions")
-    workers_engine_task: Optional[pydantic.conint(ge=1)] = pydantic.Field(
+    workers_engine_task: Optional[Annotated[int, Field(ge=1)]] = pydantic.Field(
         100, description="Number of workers in the Engine threadPool that Engines use to wait for tasks to complete")
-    workers_backend_k8s: Optional[pydantic.conint(ge=1)] = pydantic.Field(
+    workers_backend_k8s: Optional[Annotated[int, Field(ge=1)]] = pydantic.Field(
         50, description="Number of workers in the Backend.Kubernetes threadPool")
 
     @pydantic.root_validator(pre=True)

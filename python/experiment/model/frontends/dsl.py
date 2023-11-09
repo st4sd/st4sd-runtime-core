@@ -103,7 +103,7 @@ import copy
 import typing
 
 import experiment.model.codes
-import pydantic.typing
+import typing_extensions
 import pydantic
 import re
 
@@ -129,15 +129,15 @@ OutputReferenceNested = rf'(?P<location>"<{TemplatePattern}>")(/(?P<location_nes
 RevampedReferencePattern = fr'"(?P<reference>([.a-zA-Z0-9_/-])+)"{PatternReferenceMethod}'
 LegacyReferencePattern = fr'(?P<reference>([.a-zA-Z0-9_/-])+){PatternReferenceMethod}'
 
-TargetReference = pydantic.constr(regex=fr"<{StepNamePattern}>")
-ParameterReference = pydantic.constr(regex=ParameterPattern)
-MaxRestarts = pydantic.conint(gt=-2)
-BackendType = pydantic.constr(regex=fr'({ParameterPattern}|docker|local|lsf|kubernetes)')
-K8sQosType = pydantic.constr(regex=fr'({ParameterPattern}|guaranteed|burstable|besteffort)')
-DockerImagePullPolicy = pydantic.constr(regex=fr'({ParameterPattern}|Always|Never|IfNotPresent)')
-ResourceRequestFloat = pydantic.confloat(ge=0)
-ResourceRequestInt = pydantic.conint(ge=0)
-EnvironmentReference = pydantic.constr(regex=fr'({ParameterPattern}|none|environment)')
+TargetReference = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr"<{StepNamePattern}>")]
+ParameterReference = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=ParameterPattern)]
+MaxRestarts = typing_extensions.Annotated[int, pydantic.Field(gt=-2)]
+BackendType = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr'({ParameterPattern}|docker|local|lsf|kubernetes)')]
+K8sQosType = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr'({ParameterPattern}|guaranteed|burstable|besteffort)')]
+DockerImagePullPolicy = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr'({ParameterPattern}|Always|Never|IfNotPresent)')]
+ResourceRequestFloat = typing_extensions.Annotated[int, pydantic.Field(ge=0)]
+ResourceRequestInt = typing_extensions.Annotated[int, pydantic.Field(ge=0)]
+EnvironmentReference = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr'({ParameterPattern}|none|environment)')]
 
 
 class OutputReference:
@@ -253,8 +253,26 @@ class Parameter(pydantic.BaseModel):
         min_length=1
     )
     default: typing.Optional[ParameterValueType] = pydantic.Field(
+        None,
         description="The default value of the parameter",
     )
+
+
+class InstantiatedParameter(Parameter):
+    value: typing.Optional[ParameterValueType] = pydantic.Field(
+        None,
+        description="The value of the parameter, if unset defaults to @default"
+    )
+
+    def get_value(self) -> typing.Optional[ParameterValueType]:
+        """The value of the parameter, if unset defaults to @default
+
+        Returns:
+            The value of the parameter, if unset defaults to @default
+        """
+        if 'value' in self.__fields_set__:
+            return self.value
+        return self.default
 
 
 class Signature(pydantic.BaseModel):
@@ -265,7 +283,7 @@ class Signature(pydantic.BaseModel):
         description="The name of the template, must be unique in the parent namespace",
         min_length=1,
         # VV: Names cannot end in digits - FlowIR has a special meaning for digits at the end of component names
-        regex=SignatureNamePattern
+        pattern=SignatureNamePattern
     )
 
     description: typing.Optional[str] = pydantic.Field(
@@ -284,7 +302,7 @@ class ExecuteStep(pydantic.BaseModel):
 
     target: TargetReference = pydantic.Field(
         description="Reference to a step name. A string enclosed in <> e.g. <foo>", min_length=3,
-        regex=fr"<{StepNamePattern}>",
+        pattern=fr"<{StepNamePattern}>",
     )
 
     args: typing.Dict[str, ParameterValueType] = pydantic.Field(
@@ -298,7 +316,7 @@ class ExecuteStep(pydantic.BaseModel):
 
 
 class ExecuteStepEntryInstance(ExecuteStep):
-    target: pydantic.typing.Literal["<entry-instance>"] = pydantic.Field(
+    target: typing_extensions.Literal["<entry-instance>"] = pydantic.Field(
         "<entry-instance>", description="The entry point step name. Must be <entry-instance>."
     )
 
@@ -312,7 +330,7 @@ class Workflow(pydantic.BaseModel):
         description="The Signature of the Workflow template"
     )
 
-    steps: typing.Dict[str, pydantic.constr(regex=SignatureNamePattern)] = pydantic.Field(
+    steps: typing.Dict[str, typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=SignatureNamePattern)]] = pydantic.Field(
         description="Instantiated Templates that execute as steps of the parent workflow. "
                     "key: value pairs where the key is the name of the Instance and the value is the name "
                     "of the Template from which to create the Instance."
@@ -372,10 +390,8 @@ class CResourceManagerLSF(pydantic.BaseModel):
     class Config:
         extra = "forbid"
 
-    statusRequestInterval: pydantic.conint(ge=20) = pydantic.Field(
-        20,
-        description="How many seconds to wait between polling the status of LSF tasks"
-    )
+    statusRequestInterval: typing_extensions.Annotated[int, pydantic.Field(
+        description="How many seconds to wait between polling the status of LSF tasks", ge=20)] = 20
 
     queue: str = pydantic.Field(
         "normal",
@@ -674,7 +690,7 @@ class CExecutorPre(pydantic.BaseModel):
     class Config:
         extra = "forbid"
 
-    name: pydantic.typing.Literal['lsf-dm-in'] = pydantic.Field(
+    name: typing_extensions.Literal['lsf-dm-in'] = pydantic.Field(
         'lsf-dm-in',
         description="The name of the pre-executor"
     )
@@ -692,7 +708,7 @@ class CExecutorPost(pydantic.BaseModel):
     class Config:
         extra = "forbid"
 
-    name: pydantic.typing.Literal['lsf-dm-out'] = pydantic.Field(
+    name: typing_extensions.Literal['lsf-dm-out'] = pydantic.Field(
         'lsf-dm-out',
         description="The name of the post-executor"
     )
@@ -737,7 +753,7 @@ class CCommand(pydantic.BaseModel):
 
     expandArguments: typing.Optional[
         typing.Union[ParameterReference,
-        pydantic.typing.Literal["double-quote", "none"]]
+        typing_extensions.Literal["double-quote", "none"]]
     ] = pydantic.Field(
         "double-quote",
         description="When set to \"double-quote\" it instructs the runtime to expand the arguments to tasks using the "

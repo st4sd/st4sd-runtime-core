@@ -8,7 +8,8 @@ from typing import Dict, Optional
 
 import pydantic
 import typer
-from pydantic import AnyHttpUrl, BaseModel, BaseSettings
+from pydantic import AnyHttpUrl, BaseModel
+from pydantic_settings import BaseSettings
 
 #
 APP_NAME = "stp"

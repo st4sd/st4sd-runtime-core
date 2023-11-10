@@ -1473,14 +1473,31 @@ class DSLExperimentConfiguration(FlowIRExperimentConfiguration):
         with open(dsl_path, 'r') as f:
             dictionary = yaml.safe_load(f)
 
-        self.dsl_namespace = experiment.model.frontends.dsl.Namespace(**dictionary)
+        try:
+            self.dsl_namespace = experiment.model.frontends.dsl.Namespace(**dictionary)
+        except pydantic.ValidationError as e:
+            errors = e.errors()
+            error = experiment.model.errors.DSLInvalidError(
+                underlying_errors=[
+                    experiment.model.errors.DSLInvalidFieldError(
+                        location=err.get('loc', []),
+                        underlying_error=ValueError(err.get('msg', 'Unknown syntax error')),
+
+                    ) for err in errors
+                ]
+            )
+
+            raise experiment.model.errors.ExperimentInvalidConfigurationError(
+                "The DSL 2.0 definition of the experiment is invalid",
+                underlyingError=error
+            )
 
         override_entrypoint_args = None
 
         if variable_files:
-            # VV: If there're variable files then load them, and then use them to override the parameters
+            # VV: If there are variable files then load them, and then use them to override the parameters
             # of the entry-instance step in the entrypoint
-            # We need to do this step before we executing namespace_to_flowir() because that method replaces all
+            # We need to do this step before executing namespace_to_flowir() because that method replaces all
             # variable references with the values of said variables.
             variables = self.layer_many_variable_files(variable_files)
 
@@ -1501,10 +1518,16 @@ class DSLExperimentConfiguration(FlowIRExperimentConfiguration):
                     override_entrypoint_args = (self.dsl_namespace.entrypoint.execute[0].args or {}).copy()
                     override_entrypoint_args.update({name: value for name, value in variables["global"].items()})
 
-        concrete = experiment.model.frontends.dsl.namespace_to_flowir(
-            namespace=self.dsl_namespace,
-            override_entrypoint_args=override_entrypoint_args
-        )
+        try:
+            concrete = experiment.model.frontends.dsl.namespace_to_flowir(
+                namespace=self.dsl_namespace,
+                override_entrypoint_args=override_entrypoint_args
+            )
+        except experiment.model.errors.DSLInvalidError as e:
+            raise experiment.model.errors.ExperimentInvalidConfigurationError(
+                "The DSL 2.0 definition of the experiment is invalid",
+                underlyingError=e
+            )
 
         super().__init__(
             path=path,

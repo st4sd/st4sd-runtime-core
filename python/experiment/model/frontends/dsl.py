@@ -1331,15 +1331,37 @@ class ScopeStack:
 
         dsl_error = experiment.model.errors.DSLInvalidError([])
 
+        known_template_names = {}
+
+        for (kind, templates) in (
+                ("Workflow", namespace.workflows),
+                ("Component", namespace.components)
+        ):
+            for idx, temp in enumerate(templates):
+                if temp.signature.name in known_template_names:
+                    template_type = known_template_names[temp.signature.name]
+                    dsl_error.underlying_errors.append(
+                        experiment.model.errors.DSLInvalidFieldError(
+                            location=[kind.lower() + "s", idx],
+                            underlying_error=KeyError(f"There already is a {template_type} "
+                                                      f"template called {temp.signature.name}")
+                        )
+                    )
+                else:
+                    known_template_names[temp.signature.name] = kind
+
         try:
             initial_template = namespace.get_template(namespace.entrypoint.entryInstance)
         except Exception as e:
+            initial_template = None # VV: keeps linter happy
             dsl_error.underlying_errors.append(
                 experiment.model.errors.DSLInvalidFieldError(
                     location=["entrypoint", "entry-instance"],
                     underlying_error=e
                 )
             )
+
+        if dsl_error.underlying_errors:
             raise dsl_error
 
         if isinstance(initial_template, Workflow):
@@ -1712,6 +1734,8 @@ class ComponentFlowIR:
                                  f"the output {match.group(0)} but the OutputReference is partial, it does not "
                                  f"end with a :$method suffix.")
                 )
+            else:
+                arguments_output.add(match.group(0))
 
         for idx, (name, value) in enumerate(self.scope.parameters.items()):
             if not isinstance(value, str):

@@ -22,7 +22,10 @@ import pytest
 
 from . import utils
 
-from .test_dsl import (dsl_one_workflow_one_component_one_step_no_datareferences)
+from .test_dsl import (
+    dsl_one_workflow_one_component_one_step_no_datareferences,
+    dsl_conflicting_templates,
+)
 
 logger = logging.getLogger('test')
 
@@ -44,6 +47,55 @@ def test_load_dsl2(output_dir, dsl_one_workflow_one_component_one_step_no_datare
     # VV: Now make sure that the package is valid - perform check_executable checks too
     compExperiment.validateExperiment(ignoreTestExecutablesError=False)
 
+
+def test_load_dsl_with_bad_grammar(output_dir, dsl_conflicting_templates):
+    pkg_dir = os.path.join(output_dir, "workflow.package")
+    utils.populate_files(pkg_dir, {"conf/dsl.yaml": yaml.safe_dump(dsl_conflicting_templates)})
+
+    instance_dir = os.path.join(output_dir, "package.instance")
+    os.makedirs(instance_dir)
+    isValid, error, compExperiment = experiment.test.ValidatePackage(pkg_dir, location=instance_dir)
+
+    assert isValid is False
+
+    assert isinstance(error, experiment.model.errors.ExperimentInvalidConfigurationError)
+
+    assert isinstance(error.underlyingError, experiment.model.errors.DSLInvalidError)
+
+    assert error.underlyingError.errors() == [
+         {'loc': ['workflows', 1], 'msg': 'There already is a Workflow template called main'},
+         {'loc': ['components', 0], 'msg': 'There already is a Workflow template called main'},
+         {'loc': ['components', 2], 'msg': 'There already is a Component template called comp'}
+    ]
+
+
+def test_load_dsl_with_bad_syntax(output_dir):
+    dsl="""
+    entrypoint:
+      pretend: to be a DSL file
+    components: [
+        pretend: to be a DSL file
+    ]
+    """
+    pkg_dir = os.path.join(output_dir, "workflow.package")
+    utils.populate_files(pkg_dir, {"conf/dsl.yaml": dsl})
+
+    instance_dir = os.path.join(output_dir, "package.instance")
+    os.makedirs(instance_dir)
+    isValid, error, compExperiment = experiment.test.ValidatePackage(pkg_dir, location=instance_dir)
+
+    assert isValid is False
+
+    assert isinstance(error, experiment.model.errors.ExperimentInvalidConfigurationError)
+
+    assert isinstance(error.underlyingError, experiment.model.errors.DSLInvalidError)
+
+    assert error.underlyingError.errors() == [
+        {'loc': ['entrypoint', 'entry-instance'], 'msg': 'Field required'},
+        {'loc': ['entrypoint', 'pretend'], 'msg': 'Extra inputs are not permitted'},
+        {'loc': ['components', 0, 'signature'], 'msg': 'Field required'},
+        {'loc': ['components', 0, 'pretend'], 'msg': 'Extra inputs are not permitted'}
+    ]
 
 def test_load_dsl2_with_user_variables(
     output_dir,

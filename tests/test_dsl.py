@@ -685,6 +685,110 @@ def dsl_with_cycle() -> typing.Dict[str, typing.Any]:
     """)
 
 
+@pytest.fixture()
+def dsl_nested_workflows() -> typing.Dict[str, typing.Any]:
+    return yaml.safe_load("""
+        entrypoint:
+          entry-instance: test
+          execute:
+          - target: "<entry-instance>"
+            args: {}
+        workflows:
+        - signature:
+            name: test
+            parameters:
+            - name: input.a
+              default: ''
+            - name: b
+              default: '20'
+          steps:
+            generator: generator
+            consumer: consumer
+          execute:
+          - target: "<generator>"
+            args:
+              a: "%(input.a)s:output"
+              b: "%(b)s"
+          - target: "<consumer>"
+            args:
+              one: "<generator>"
+        components:
+        - signature:
+            name: generator
+            parameters:
+            - name: a
+              default: ''
+            - name: b
+              default: ''
+          command:
+            executable: a
+            arguments: "%(a)s %(b)s"
+        - signature:
+            name: consumer
+            parameters:
+            - name: one
+              default: ''
+          command:
+            executable: a
+            arguments: "%(one)s:ref"
+        """)
+
+
+@pytest.fixture()
+def dsl_conflicting_templates() -> typing.Dict[str, typing.Any]:
+    return yaml.safe_load("""
+    entrypoint:
+      entry-instance: main
+      execute:
+      - target: <entry-instance>
+        args: {}
+    
+    workflows:
+    - signature:
+        name: main
+      execute: []
+      steps: {}
+    - signature:
+        name: main
+      execute: []
+      steps: {}
+    components:
+    - signature:
+        name: main
+      command:
+        executable: echo
+        arguments: hello
+    - signature:
+        name: comp
+      command:
+        executable: echo
+        arguments: hello
+    - signature:
+        name: comp
+      command:
+        executable: echo
+        arguments: hello
+    """)
+
+
+def test_dsl_conflicting_templates(dsl_conflicting_templates: typing.Dict[str, typing.Any]):
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl_conflicting_templates)
+    scopes = experiment.model.frontends.dsl.ScopeStack()
+    with pytest.raises(experiment.model.errors.DSLInvalidError) as e:
+        scopes.discover_all_instances_of_templates(namespace)
+
+    assert e.value.errors() == [
+        {'loc': ['workflows', 1], 'msg': 'There already is a Workflow template called main'},
+        {'loc': ['components', 0], 'msg': 'There already is a Workflow template called main'},
+        {'loc': ['components', 2], 'msg': 'There already is a Component template called comp'}
+    ]
+
+
+def test_dsl_nested_workflows(dsl_nested_workflows: typing.Dict[str, typing.Any]):
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl_nested_workflows)
+    experiment.model.frontends.dsl.namespace_to_flowir(namespace)
+
+
 def test_detect_cycle(dsl_with_cycle: typing.Dict[str, typing.Any]):
     namespace = experiment.model.frontends.dsl.Namespace(**dsl_with_cycle)
     scopes = experiment.model.frontends.dsl.ScopeStack()

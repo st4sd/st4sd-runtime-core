@@ -17,6 +17,7 @@ import experiment.model.frontends.flowir
 import experiment.model.graph
 import experiment.model.frontends.dsl
 import experiment.test
+import experiment.model.frontends.dsl
 
 import os
 
@@ -27,6 +28,66 @@ from . import utils
 from .test_dsl import (
     dsl_one_workflow_one_component_one_step_no_datareferences,
 )
+
+
+def test_dsl_from_replicated_and_non_replicated_component():
+    flowir = experiment.model.frontends.flowir.yaml_load("""
+    variables:
+      default:
+        global:
+          number: 0
+          replica: 12
+    
+    components:
+    - name: plain
+      command:
+        executable: echo
+        arguments: hello world
+    
+    - name: replicated
+      command:
+        executable: echo
+        arguments: hello world %
+      workflowAttributes:
+        replicate: "%(number)s"
+    
+    - name: plain-but-with-var
+      command:
+        executable: echo
+        arguments: hello world %(replica)s %(number)s
+    
+    """)
+    graph = experiment.model.graph.WorkflowGraph.graphFromFlowIR(flowir, {})
+
+    dsl = graph.to_dsl()
+
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl)
+
+    plain = namespace.get_template("stage0.plain")
+
+    assert len(plain.signature.parameters) == 0
+
+    replicated = namespace.get_template("stage0.replicated")
+
+    assert len(replicated.signature.parameters) == 1
+    assert replicated.signature.parameters[0].model_dump() == {
+        "name": "number",
+        "default": None
+    }
+
+    plain_but_with_var = namespace.get_template("stage0.plain-but-with-var")
+
+    assert len(plain_but_with_var.signature.parameters) == 2
+
+    assert plain_but_with_var.signature.get_parameter("number").model_dump() ==  {
+        "name": "number",
+        "default": None
+    }
+
+    assert plain_but_with_var.signature.get_parameter("replica").model_dump() == {
+        "name": "replica",
+        "default": None
+    }
 
 
 def test_graph_from_dictionaries():

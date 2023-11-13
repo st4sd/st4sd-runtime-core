@@ -1135,6 +1135,10 @@ class ComponentSpecification(experiment.model.interface.InternalRepresentationAt
 
         comp_vars = OrderedDict(comp_no_platform.get('variables', {}))
 
+        if self.workflowAttributes['replicate'] not in [0, None, '']:
+            # VV: If this is a component which MAY replicate then ith as a `replica` variable that's implied
+            comp_vars['replica'] = self.workflowAttributes['replicate']
+
         all_var_refs = experiment.model.frontends.flowir.FlowIR.discover_references_to_variables(comp_with_platform)
 
         # VV: Order of parameters:

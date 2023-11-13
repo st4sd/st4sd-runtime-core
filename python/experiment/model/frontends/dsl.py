@@ -295,6 +295,13 @@ class Signature(pydantic.BaseModel):
         [], description="The collection of the parameters to the template"
     )
 
+    def get_parameter(self, name: str) -> Parameter:
+        for p in self.parameters:
+            if p.name == name:
+                return p
+
+        raise KeyError(f"{self.name} does not contain parameter {name}")
+
 
 class ExecuteStep(pydantic.BaseModel):
     class Config:
@@ -464,7 +471,7 @@ class CResourceManagerKubernetes(pydantic.BaseModel):
     )
 
     namespace: typing.Optional[str] = pydantic.Field(
-        None,
+        "default",
         description="(deprecated) The name of the namespace to host the resulting Job"
     )
 
@@ -475,11 +482,11 @@ class CResourceManagerKubernetes(pydantic.BaseModel):
     )
 
     host: typing.Optional[str] = pydantic.Field(
-        None,
+        "http://localhost:8080",
         description="(deprecated) The url to the Kubernetes REST API"
     )
 
-    @pydantic.validator("qos", pre=True)
+    @pydantic.field_validator("qos", mode='before')
     def val_to_lowercase(cls, value: typing.Optional[str]) -> typing.Optional[str]:
         if isinstance(value, str):
             value = value.lower()
@@ -497,7 +504,7 @@ class CResourceManagerDocker(pydantic.BaseModel):
     )
 
     imagePullPolicy: typing.Optional[DockerImagePullPolicy] = pydantic.Field(
-        None,
+        'Always',
         description="Configures the image pull policy for this Task. The logic is similar to the one that Kubernetes "
                     "uses."
     )
@@ -519,17 +526,17 @@ class CResourceManager(pydantic.BaseModel):
     )
 
     lsf: typing.Optional[CResourceManagerLSF] = pydantic.Field(
-        None,
+        default_factory=CResourceManagerLSF,
         description="Configuration for the LSF backend. In use when config.backend is set to \"lsf\""
     )
 
     kubernetes: typing.Optional[CResourceManagerKubernetes] = pydantic.Field(
-        None,
+        default_factory=CResourceManagerKubernetes,
         description="Configuration for the Kubernetes backend. In use when config.backend is set to \"kubernetes\""
     )
 
     docker: typing.Optional[CResourceManagerDocker] = pydantic.Field(
-        None,
+        default_factory=CResourceManagerDocker,
         description="Configuration for the Docker-like backend. In use when config.backend is set to \"docker\""
     )
 
@@ -539,27 +546,27 @@ class COptimizer(pydantic.BaseModel):
         extra = "forbid"
 
     disable: typing.Optional[bool] = pydantic.Field(
-        None,
+        False,
         description="(deprecated) Whether to disable the optimizer"
     )
 
     exploitChance: typing.Optional[float] = pydantic.Field(
-        None,
+        0.9,
         description="(deprecated)"
     )
 
     exploitTarget: typing.Optional[float] = pydantic.Field(
-        None,
+        0.75,
         description="(deprecated)"
     )
 
     exploitTargetLow: typing.Optional[float] = pydantic.Field(
-        None,
+        0.25,
         description="(deprecated)"
     )
 
     exploitTargetHigh: typing.Optional[float] = pydantic.Field(
-        None,
+        0.5,
         description="(deprecated)"
     )
 
@@ -630,22 +637,22 @@ class CWorkflowAttributes(pydantic.BaseModel):
     )
 
     isMigratable: typing.Optional[bool] = pydantic.Field(
-        None,
+        False,
         description="(deprecated) Whether this component can migrate to later stages"
     )
 
     isMigrated: typing.Optional[bool] = pydantic.Field(
-        None,
+        False,
         description="(deprecated) Whether this component has migrated from earlier stages"
     )
 
     isRepeat: typing.Optional[bool] = pydantic.Field(
-        None,
+        False,
         description="(deprecated) Whether this component repeats - tracked internally"
     )
 
     optimizer: typing.Optional[COptimizer] = pydantic.Field(
-        None,
+        default_factory=COptimizer,
         description="(deprecated) Settings for the optimization of repeat intervals for repeating components"
     )
 
@@ -1251,8 +1258,8 @@ class ScopeStack:
         for p in template.signature.parameters:
             if p.name in parameters:
                 continue
-            if "default" not in p.__fields_set__:
-                errors.append(ValueError(f"The step {p.name} in location {'/'.join(location)} "
+            if "default" not in p.model_fields_set:
+                errors.append(ValueError(f"The parameter {p.name} in location {'/'.join(location)} "
                                          f"does not have a value or default"))
         if errors:
             dsl_error = experiment.model.errors.DSLInvalidError([])
@@ -1530,18 +1537,55 @@ class ScopeStack:
                         continue
 
                     parameters = copy.deepcopy(execute.args or {})
+                    execute_args_are_fine = True
 
-                    new_scope = ScopeStack.Scope(
-                        location=scope.location + [execute.get_target()],
-                        dsl_location=scope.dsl_location() + ["execute", idx],
-                        parameters=parameters,
-                        template=template,
-                    )
+                    for (name, value) in parameters.items():
+                        param_refs = experiment.model.frontends.flowir.FlowIR.discover_references_to_variables(value)
+                        for p in param_refs:
+                            try:
+                                _ = scope.template.signature.get_parameter(p)
+                            except KeyError as e:
+                                dsl_error.underlying_errors.append(
+                                    experiment.model.errors.DSLInvalidFieldError(
+                                        location=scope.dsl_location() + ["execute", idx],
+                                        underlying_error=e
+                                    )
+                                )
+                                execute_args_are_fine = False
+                        try:
+                            _ = template.signature.get_parameter(name)
+                        except KeyError as e:
+                            dsl_error.underlying_errors.append(
+                                experiment.model.errors.DSLInvalidFieldError(
+                                    location=scope.dsl_location() + ["execute", idx],
+                                    underlying_error=e
+                                )
+                            )
+                            execute_args_are_fine = False
+                    for param in template.signature.parameters:
+                        if param.name not in parameters and param.default is None:
+                            dsl_error.underlying_errors.append(
+                                experiment.model.errors.DSLInvalidFieldError(
+                                    location=scope.dsl_location() + ["execute", idx, "args"],
+                                    underlying_error=ValueError(f"The parameter {param.name} of {template_name} "
+                                                                f"does not have a default value and is not given "
+                                                                f"a value")
+                                )
+                            )
+                            execute_args_are_fine = False
 
-                    if isinstance(template, Workflow):
-                        children_scopes.append((Action.Enter, new_scope))
-                    else:
-                        children_scopes.insert(0, (Action.Enter, new_scope))
+                    if execute_args_are_fine:
+                        new_scope = ScopeStack.Scope(
+                            location=scope.location + [execute.get_target()],
+                            dsl_location=scope.dsl_location() + ["execute", idx],
+                            parameters=parameters,
+                            template=template,
+                        )
+
+                        if isinstance(template, Workflow):
+                            children_scopes.append((Action.Enter, new_scope))
+                        else:
+                            children_scopes.insert(0, (Action.Enter, new_scope))
                 missing_steps = [x for x in scope.template.steps if x not in instantiated_steps]
 
                 for missing in missing_steps:

@@ -171,20 +171,25 @@ class DSLInvalidFieldError(Exception):
             setattr(self, key, value)
 
     def __str__(self):
-        return "DSL Error at " + "/".join(map(str, self.location)) + ": " + str(self.underlying_error)
+        return "DSL Error at " + "/".join(map(str, self.location)) + ": " + self.underlying_to_str()
+
+    def underlying_to_str(self) -> str:
+        # VV: KeyError quotes str(KeyError) in '
+        err = str(self.underlying_error) if self.underlying_error else "unknown"
+
+        if (
+                (err.startswith('"') and err.endswith('"'))
+                or (err.startswith("'") and err.endswith("'"))
+        ):
+            err = err[1:-1]
+
+        return err
 
     def pretty_error(self) -> typing.Dict[str, typing.Any]:
         err = {
             "loc": list(self.location),
-            "msg": str(self.underlying_error),
+            "msg": self.underlying_to_str(),
         }
-
-        # VV: KeyError quotes str(KeyError) in '
-        if (
-            (err['msg'].startswith('"') and err['msg'].endswith('"'))
-            or (err['msg'].startswith("'") and err['msg'].endswith("'"))
-        ):
-            err['msg'] = err['msg'][1:-1]
 
         try:
             err["type"] = self.type

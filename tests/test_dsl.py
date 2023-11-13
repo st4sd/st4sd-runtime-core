@@ -288,7 +288,6 @@ def dsl_band_gap_pm3_gamess_us() -> typing.Dict[str, typing.Any]:
       - target: <stage0.GetMoleculeIndex>
         args:
           numberMolecules: '%(numberMolecules)s'
-          replica: '%(replica)s'
           startIndex: '%(startIndex)s'
       - target: <stage0.SetBasis>
         args:
@@ -333,7 +332,6 @@ def dsl_band_gap_pm3_gamess_us() -> typing.Dict[str, typing.Any]:
         name: stage0.GetMoleculeIndex
         parameters:
         - name: numberMolecules
-        - name: replica
         - name: startIndex
       command:
         executable: python
@@ -769,7 +767,6 @@ def dsl_conflicting_templates() -> typing.Dict[str, typing.Any]:
         executable: echo
         arguments: hello
     """)
-
 
 def test_dsl_conflicting_templates(dsl_conflicting_templates: typing.Dict[str, typing.Any]):
     namespace = experiment.model.frontends.dsl.Namespace(**dsl_conflicting_templates)

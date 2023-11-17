@@ -1082,3 +1082,69 @@ def test_validate_dsl_with_unknown_params():
     assert exc.underlying_errors[0].location == ["components", 0, "command", "arguments"]
     assert str(exc.underlying_errors[0].underlying_error) == ('Reference to unknown parameter "hello". '
                                                               'Known parameters are {}')
+
+
+def test_unknown_outputreference():
+    dsl = yaml.safe_load("""
+    entrypoint:
+      entry-instance: outer
+      execute:
+      - target: "<entry-instance>"
+        args: {}
+    workflows:
+    - signature:
+        name: outer
+      steps:
+        left: left
+        right: right
+      execute:
+      - target: "<left>"
+      - target: "<right>"
+    - signature:
+        name: left
+      steps:
+        echo-left: echo
+      execute:
+      - target: "<echo-left>"
+        args:
+          message: "<right/echo-right>:output"
+    - signature:
+        name: right
+      steps:
+        echo-right: not-echo
+      execute:
+      - target: "<echo-right>"
+    components:
+    - signature:
+        name: echo
+        description:
+        parameters:
+        - name: message
+      command:
+        executable: echo
+        arguments: "%(message)s"
+    - signature:
+        name: not-echo
+        description:
+        parameters:
+        - name: message
+          default: hello
+      command:
+        executable: echo
+        arguments: "%(message)s"
+    """)
+
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl)
+    with pytest.raises(experiment.model.errors.DSLInvalidError) as e:
+        _ = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
+
+    exc = e.value
+
+    assert len(exc.underlying_errors) == 1
+
+    assert exc.errors() == [
+        {
+            'loc': ['workflows', 1, 'execute', 0, 'signature', 'parameters', 0],
+            'msg': 'OutputReference <right/echo-right>:output does not reference any of the known siblings []'
+        }
+    ]

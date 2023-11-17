@@ -968,12 +968,17 @@ class ScopeStack:
             location: typing.List[str],
             parameters: typing.Dict[str, ParameterValueType],
             template: typing.Union[Workflow, Component],
-            dsl_location: typing.List[typing.Union[str, int]]
+            dsl_location: typing.List[typing.Union[str, int]],
+            template_location: typing.List[typing.Union[str, int]],
         ):
             self.location = location
             self.parameters = parameters or {}
             self.template: typing.Union[Workflow, Component] = template.copy(deep=True)
             self._dsl_location = list(dsl_location)
+            self._template_location = list(template_location)
+
+        def template_location(self)  -> typing.List[typing.Union[str, int]]:
+            return list(self._template_location)
 
         def dsl_location(self) -> typing.List[typing.Union[str, int]]:
             return list(self._dsl_location)
@@ -1059,6 +1064,8 @@ class ScopeStack:
                         all_scopes=all_scopes,
                         ensure_references_point_to_sibling_steps=ensure_references_point_to_sibling_steps,
                     )
+                except experiment.model.errors.DSLInvalidFieldError as e:
+                    errors.append(e)
                 except ValueError as e:
                     errors.append(
                         experiment.model.errors.DSLInvalidFieldError(
@@ -1069,6 +1076,8 @@ class ScopeStack:
 
                 try:
                     self.parameters[name] = self.replace_revamped_references(value=self.parameters[name])
+                except experiment.model.errors.DSLInvalidFieldError as e:
+                    errors.append(e)
                 except ValueError as e:
                     errors.append(
                         experiment.model.errors.DSLInvalidFieldError(
@@ -1234,11 +1243,12 @@ class ScopeStack:
         self.scopes: typing.Dict[typing.Tuple[str], ScopeStack.Scope] = {}
 
     def enter(
-            self,
-            name: str,
-            parameters: typing.Dict[str, ParameterValueType],
-            template: typing.Union[Workflow, Component],
-            dsl_location: typing.List[typing.Union[str, int]]
+        self,
+        name: str,
+        parameters: typing.Dict[str, ParameterValueType],
+        template: typing.Union[Workflow, Component],
+        dsl_location: typing.List[typing.Union[str, int]],
+        template_location: typing.List[typing.Union[str, int]]
     ):
         parameters = copy.deepcopy(parameters)
         errors = []
@@ -1253,7 +1263,8 @@ class ScopeStack:
             location=location,
             parameters=parameters,
             template=template,
-            dsl_location=dsl_location
+            dsl_location=dsl_location,
+            template_location=template_location,
         )
 
         for p in template.signature.parameters:
@@ -1310,6 +1321,51 @@ class ScopeStack:
             return sorted(scope.parameters)
 
         return []
+
+    def _check_for_cycle(
+        self,
+        template_name: str,
+        scope: Scope,
+        execute_step_index: int,
+    ):
+        for predecessor in self.stack:
+            if predecessor.template.signature.name == template_name:
+                raise experiment.model.errors.DSLInvalidFieldError(
+                    location=scope.template_location() + ["execute", execute_step_index],
+                    underlying_error=ValueError("The computational graph contains a cycle")
+                )
+
+    @classmethod
+    def _get_template_location(
+        cls,
+        namespace: Namespace,
+        template: typing.Union[Workflow, Component]
+    ) -> typing.List[typing.Union[str, int]]:
+        """Utility method to get the location in the DSL that defines a template
+
+        The code uses this to build pretty error messages
+
+        Args:
+            namespace:
+                the DSL namespace
+            template:
+                the template
+        Returns:
+            An array indicating the location e.g `["workflows", 42]`
+        """
+
+        if isinstance(template, Workflow):
+            collection = namespace.workflows
+            template_location = ["workflows"]
+        else:
+            collection = namespace.components
+            template_location = ["components"]
+
+        for i in range(len(collection)):
+            if collection[i].signature.name == template.signature.name:
+                template_location += [i]
+                return template_location
+
 
     def discover_all_instances_of_templates(
         self,
@@ -1404,6 +1460,7 @@ class ScopeStack:
                     dsl_location=dsl_location,
                     template=initial_template,
                     parameters=override_entrypoint_args or namespace.entrypoint.execute[0].args,
+                    template_location=self._get_template_location(namespace=namespace, template=initial_template),
                 )
             )
         ]
@@ -1420,7 +1477,8 @@ class ScopeStack:
                     name=scope.name,
                     parameters=scope.parameters,
                     template=scope.template,
-                    dsl_location=scope.dsl_location()
+                    dsl_location=scope.dsl_location(),
+                    template_location=scope.template_location(),
                 )
             except experiment.model.errors.DSLInvalidFieldError as e:
                 dsl_error.underlying_errors.append(e)
@@ -1495,7 +1553,7 @@ class ScopeStack:
                     if execute.get_target() in instantiated_steps:
                         dsl_error.underlying_errors.append(
                             experiment.model.errors.DSLInvalidFieldError(
-                                location=scope.dsl_location() + ["execute", idx],
+                                location=scope.template_location() + ["execute", idx],
                                 underlying_error=KeyError(f"Node {child_location} has already been instantiated")
                             )
                         )
@@ -1507,23 +1565,10 @@ class ScopeStack:
                     except KeyError:
                         dsl_error.underlying_errors.append(
                             experiment.model.errors.DSLInvalidFieldError(
-                                location=scope.dsl_location() + ["execute", idx],
+                                location=scope.template_location() + ["execute", idx],
                                 underlying_error=KeyError(f"Node {child_location} has no matching step")
                             )
                         )
-                        continue
-
-                    # VV: The DSL has a cycle in it if this scope is about to use a template that has already been used
-                    # to form one of the upstream nodes
-                    try:
-                        for predecessor in self.stack:
-                            if predecessor.template.signature.name == template_name:
-                                raise experiment.model.errors.DSLInvalidFieldError(
-                                        location=scope.dsl_location() + ["execute", idx],
-                                        underlying_error=ValueError("The computational graph contains a cycle")
-                                    )
-                    except experiment.model.errors.DSLInvalidFieldError as e:
-                        dsl_error.underlying_errors.append(e)
                         continue
 
                     try:
@@ -1531,10 +1576,20 @@ class ScopeStack:
                     except KeyError:
                         dsl_error.underlying_errors.append(
                             experiment.model.errors.DSLInvalidFieldError(
-                                location=scope.dsl_location() + ["execute", idx],
+                                location=scope.template_location() + ["execute", idx],
                                 underlying_error=KeyError(f"Node {child_location} has no matching template")
                             )
                         )
+                        continue
+
+                    # VV: The DSL has a cycle in it if this scope is about to use a Workflow that has already been used
+                    # to form one of the upstream nodes
+                    try:
+                        self._check_for_cycle(
+                            template_name=template_name, scope=scope, execute_step_index=idx
+                        )
+                    except experiment.model.errors.DSLInvalidFieldError as e:
+                        dsl_error.underlying_errors.append(e)
                         continue
 
                     parameters = copy.deepcopy(execute.args or {})
@@ -1548,7 +1603,7 @@ class ScopeStack:
                             except KeyError as e:
                                 dsl_error.underlying_errors.append(
                                     experiment.model.errors.DSLInvalidFieldError(
-                                        location=scope.dsl_location() + ["execute", idx],
+                                        location=scope.template_location() + ["execute", idx],
                                         underlying_error=e
                                     )
                                 )
@@ -1558,7 +1613,7 @@ class ScopeStack:
                         except KeyError as e:
                             dsl_error.underlying_errors.append(
                                 experiment.model.errors.DSLInvalidFieldError(
-                                    location=scope.dsl_location() + ["execute", idx],
+                                    location=scope.template_location() + ["execute", idx],
                                     underlying_error=e
                                 )
                             )
@@ -1567,7 +1622,7 @@ class ScopeStack:
                         if param.name not in parameters and param.default is None:
                             dsl_error.underlying_errors.append(
                                 experiment.model.errors.DSLInvalidFieldError(
-                                    location=scope.dsl_location() + ["execute", idx, "args"],
+                                    location=scope.template_location() + ["execute", idx, "args"],
                                     underlying_error=ValueError(f"The parameter {param.name} of {template_name} "
                                                                 f"does not have a default value and is not given "
                                                                 f"a value")
@@ -1575,10 +1630,13 @@ class ScopeStack:
                             )
                             execute_args_are_fine = False
 
+                    template_location = self._get_template_location(namespace, template)
+
                     if execute_args_are_fine:
                         new_scope = ScopeStack.Scope(
                             location=scope.location + [execute.get_target()],
-                            dsl_location=scope.dsl_location() + ["execute", idx],
+                            dsl_location=scope.template_location() + ["execute", idx],
+                            template_location=template_location,
                             parameters=parameters,
                             template=template,
                         )
@@ -1592,7 +1650,7 @@ class ScopeStack:
                 for missing in missing_steps:
                     dsl_error.underlying_errors.append(
                         experiment.model.errors.DSLInvalidFieldError(
-                            location=scope.dsl_location() + ["execute"],
+                            location=scope.template_location() + ["execute"],
                             underlying_error=KeyError(f"Workflow {scope.location[:-1]} does not contain an execute "
                                                       f"entry for its step {missing}")
                         )
@@ -1677,9 +1735,6 @@ class ScopeStack:
         for location, scope in scope_stack.scopes.items():
             if isinstance(scope.template, Component):
                 errors.extend(resolve_scope(scope=scope, scope_stack=scope_stack))
-
-        # for location, scope in scope_stack.scopes.items():
-        #     print(type(scope.template).__name__, scope.location, "parameters", scope.parameters)
 
         if errors:
             raise experiment.model.errors.DSLInvalidError.from_errors(errors)

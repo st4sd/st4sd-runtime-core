@@ -1047,3 +1047,38 @@ def test_dsl2_extra_arguments(
     assert len(exc.underlying_errors) == 1
     assert str(exc.underlying_errors[0].underlying_error) == "Unknown parameter bar"
     assert exc.underlying_errors[0].parameter_name == "bar"
+
+
+def test_validate_dsl_with_unknown_params():
+    dsl = yaml.safe_load("""
+        entrypoint:
+          entry-instance: bad
+          execute:
+          - target: "<entry-instance>"
+            args: {}
+        workflows:
+        - signature:
+            name: bad
+          steps:
+            unknown: unknown
+          execute:
+          - target: "<unknown>"
+        components:
+        - signature:
+            name: unknown
+          command:
+            executable: a
+            arguments: "%(hello)s"
+        """)
+
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl)
+    with pytest.raises(experiment.model.errors.DSLInvalidError) as e:
+        _ = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
+
+    exc = e.value
+
+    assert len(exc.underlying_errors) == 1
+    print(exc.underlying_errors[0].pretty_error())
+    assert exc.underlying_errors[0].location == ["components", 0, "command", "arguments"]
+    assert str(exc.underlying_errors[0].underlying_error) == ('Reference to unknown parameter "hello". '
+                                                              'Known parameters are {}')

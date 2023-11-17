@@ -792,13 +792,13 @@ def _replace_many_parameter_references(
         try:
             fillin = parameters[name]
         except KeyError:
-            raise ValueError(f"Node {loc} references (field={field}) unknown parameter {name}. "
+            raise ValueError(f"Reference to unknown parameter \"{name}\". "
                              f"Known parameters are {parameters}")
 
         if isinstance(fillin, dict):
             if not (start == 0 and match.start() == 0 and match.end() == len(what)):
-                raise ValueError(f"Node {loc} references (field={field}) a dictionary parameter "
-                                 f"{name} but the value contains more characters. The value is \"{what}\"")
+                raise ValueError(f"Reference to a dictionary parameter "
+                                 f"\"{name}\" in a string that contains more characters. The value is \"{what}\"")
             else:
                 return fillin
 
@@ -848,6 +848,7 @@ def replace_parameter_references(
     current_location = list(location)
     while should_resolve_more(value):
         current_scope = all_scopes[tuple(current_location[:-1])]
+        current_location.pop(-1)
         value = _replace_many_parameter_references(
             what=value,
             loc=current_location,
@@ -855,7 +856,7 @@ def replace_parameter_references(
             field=field,
             rg_parameter=rg_parameter
         )
-        current_location.pop(-1)
+
 
     return value
 
@@ -1692,12 +1693,14 @@ class ComponentFlowIR:
         environment: typing.Optional[typing.Dict[str, typing.Any]],
         scope: ScopeStack.Scope,
         errors: typing.List[Exception],
+        template_dsl_location: typing.List[typing.Union[str, int]]
     ):
         self.environment = environment
         self.scope = scope
         self.errors = errors
+        self.template_dsl_location = list(template_dsl_location)
 
-        self.flowir = scope.template.dict(
+        self.flowir = scope.template.model_dump(
             by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True
         )
 
@@ -1902,20 +1905,27 @@ class ComponentFlowIR:
                     self.update_value(new_value=new_value, flowir=flowir)
 
         pending: typing.List[Explore] = [Explore([], self.flowir)]
-
         while pending:
             node = pending.pop(0)
-
-            if isinstance(node.value, dict):
-                for key, value in node.value.items():
-                    location = node.location + [key]
-                    pending.insert(0, Explore(location=location, value=value))
-            elif isinstance(node.value, str):
-                node.replace_parameter_references(scope=self.scope, flowir=self.flowir)
-            elif isinstance(node.value, list):
-                for idx, value in enumerate(node.value):
-                    location = node.location + [idx]
-                    pending.insert(0, Explore(location=location, value=value))
+            try:
+                if isinstance(node.value, dict):
+                    for key, value in node.value.items():
+                        location = node.location + [key]
+                        pending.insert(0, Explore(location=location, value=value))
+                elif isinstance(node.value, str):
+                    node.replace_parameter_references(scope=self.scope, flowir=self.flowir)
+                elif isinstance(node.value, list):
+                    for idx, value in enumerate(node.value):
+                        location = node.location + [idx]
+                        pending.insert(0, Explore(location=location, value=value))
+            except experiment.model.errors.DSLInvalidFieldError as e:
+                self.errors.append(e)
+            except Exception as e:
+                self.errors.append(
+                    experiment.model.errors.DSLInvalidFieldError(
+                        self.template_dsl_location + node.location, underlying_error=e
+                    )
+                )
 
 
 def number_to_roman_like_numeral(value: int) -> str:
@@ -2024,7 +2034,7 @@ def namespace_to_flowir(
     # VV: Make a copy in the namespace and work on that, because in `auto_generate_entrypoint()` we'll patch the
     # entrypoint so that special parameters of the entry-instance Template (like input.<name> and data.<name>)
     # receive a value
-    namespace = namespace.copy(deep=True)
+    namespace: Namespace = namespace.model_copy(deep=True)
     auto_generate_entrypoint(namespace)
 
     scopes =  ScopeStack.from_namespace(
@@ -2037,7 +2047,16 @@ def namespace_to_flowir(
 
     for location, scope in scopes.scopes.items():
         if isinstance(scope.template, Component):
-            comp_flowir = digest_dsl_component(scope=scope)
+            template_dsl_location = []
+
+            # VV: enumerate messes up hints
+            for idx in range(len(namespace.components)):
+                comp = namespace.components[idx]
+                if comp.signature.name == scope.template.signature.name:
+                    template_dsl_location = ["components", idx]
+                    break
+
+            comp_flowir = digest_dsl_component(scope=scope, template_dsl_location=template_dsl_location)
             errors.extend(comp_flowir.errors)
             components[tuple(scope.location)] = comp_flowir
 
@@ -2145,6 +2164,7 @@ def namespace_to_flowir(
 
 def digest_dsl_component(
     scope: ScopeStack.Scope,
+    template_dsl_location: typing.List[typing.Union[str, int]]
 ) -> ComponentFlowIR:
     """Utility method to generate information that the caller can use to put together a FlowIRConcrete instance
 
@@ -2166,6 +2186,8 @@ def digest_dsl_component(
     Args:
         scope:
             the component Template, its parameters to instantiate it, and its unique location (uid)
+        template_dsl_location:
+            the path to the DSL field that contains the component template
 
     Returns:
         Information necessary to produce FlowIR from a Component in the form of ComponentFlowIR and a collection of
@@ -2179,6 +2201,7 @@ def digest_dsl_component(
             errors=[exc],
             environment=None,
             scope=scope,
+            template_dsl_location=template_dsl_location,
         )
 
     environment = None
@@ -2220,6 +2243,7 @@ def digest_dsl_component(
         errors=errors,
         environment=environment,
         scope=scope,
+        template_dsl_location=template_dsl_location
     )
 
     return ret

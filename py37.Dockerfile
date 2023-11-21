@@ -1,15 +1,15 @@
 # Copyright IBM Inc. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-ARG base_image=ubuntu:22.04
+ARG base_image=ubuntu:bionic
 
 FROM $base_image
 # VV: Builder image
 RUN apt-get update && \
     export DEBIAN_FRONTEND=noninteractive && \
     apt-get install -y \
-       python3.10 python3-pip python3-tk git python3-rdkit locales curl libffi-dev libssl-dev \
-       libpng-dev libjpeg-dev libfreetype6-dev pkg-config libxml2-dev libxslt-dev libpython3.10-dev \
+       python3.7 python3-pip python3-tk git locales curl libffi-dev libssl-dev \
+       libpng-dev libjpeg-dev libfreetype6-dev pkg-config libxml2-dev libxslt-dev libpython3.7-dev \
        libzmq3-dev
 ENV LANGUAGE=en
 ENV LC_ALL en_GB.UTF-8
@@ -18,7 +18,7 @@ ENV LANG en_GB.UTF-8
 RUN locale-gen ${LC_ALL}
 
 RUN python3 -m pip install --upgrade pip virtualenv setuptools six tox && \
-    python3 -m pip install papermill 
+    python3 -m pip install "pyzmq>=13,<=22.3.0" papermill 
 RUN mkdir /venvs
 
 ENV PIP_DEFAULT_TIMEOUT=120
@@ -29,7 +29,7 @@ ENV VIRTUAL_ENV=/venvs/st4sd-runtime-core
 
 RUN cd /st4sd-runtime-core && \
     export DEPLOY_VENV=${VIRTUAL_ENV} && \
-    export TOX_ENV=py310-deploy && \
+    export TOX_ENV=py37-deploy && \
     tox -e $TOX_ENV -vv && \
     chmod a+rwx ${VIRTUAL_ENV}/* && \
     chmod a+rwx ${VIRTUAL_ENV}/*/*/*
@@ -50,7 +50,7 @@ ENV LANG en_GB.UTF-8
 RUN apt-get update && \
     apt-get upgrade -y && \
     export DEBIAN_FRONTEND=noninteractive && \
-    apt-get install -y --no-install-recommends python3.10 python3-pip python3-tk libffi-dev python3-rdkit vim-tiny \
+    apt-get install -y --no-install-recommends python3.7 python3-pip python3-tk libffi-dev python-rdkit vim-tiny \
        locales libzmq3-dev && \
     locale-gen ${LC_ALL} && \
     rm -rf /var/lib/apt/lists/*

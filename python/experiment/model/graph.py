@@ -1230,6 +1230,11 @@ class ComponentSpecification(experiment.model.interface.InternalRepresentationAt
         # VV: All variables that are not explicitly set by the component must be arguments of the parent workflow
         my_args = {name: f"%({name})s" for name in sorted(set(all_var_refs).difference(own_vars))}
 
+        # VV: Since this is a replicating component, the `replica` variable is auto-injected
+        replicate = self.workflowAttributes['replicate']
+        if replicate not in ["", None, 0, "0"] and 'replica' in my_args:
+            my_args.pop("replica")
+
         top_level_folders = self.workflowGraph.configuration.top_level_folders
         app_deps = self.workflowGraph.configuration.get_application_dependencies()
 

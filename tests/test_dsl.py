@@ -937,8 +937,10 @@ def test_parse_step_references(input_outputs: typing.Tuple[str, typing.List[str]
 
 
 def test_replace_many_parameter_references():
-    x = experiment.model.frontends.dsl._replace_many_parameter_references(what="%(message)s %(other)s", loc=[],
-        parameters={"message": "hello", "other": "world", "environment": {"hi": "there"}}, field=[], )
+    x = experiment.model.frontends.dsl._replace_many_parameter_references(
+        what="%(message)s %(other)s",
+        parameters={"message": "hello", "other": "world", "environment": {"hi": "there"}},
+    )
 
     assert x == "hello world"
 
@@ -1148,3 +1150,79 @@ def test_unknown_outputreference():
             'msg': 'OutputReference <right/echo-right>:output does not reference any of the known siblings []'
         }
     ]
+
+
+def test_validate_dsl_with_variables():
+    dsl = yaml.safe_load("""
+        entrypoint:
+          entry-instance: with-vars
+          execute:
+          - target: "<entry-instance>"
+        components:
+        - signature:
+            name: with-vars
+          command:
+            executable: echo
+            arguments: "%(greeting)s"
+          variables:
+            greeting: "hi"
+        """)
+
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl)
+    flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace).raw()
+
+    assert flowir['components'][0]['command']['arguments'] == "%(greeting)s"
+
+
+def test_validate_dsl_with_replicas():
+    dsl = yaml.safe_load("""
+        entrypoint:
+          entry-instance: with-replicas
+          execute:
+          - target: "<entry-instance>"
+        workflows:
+        - signature:
+            name: with-replicas
+          steps:
+            replicate: replica-print
+            plain: print
+          execute:
+          - target: <replicate>
+            args:
+              replicas: 2
+              message: "I am replicating"
+          - target: <plain>
+            args:
+              message: <replicate>:output
+        components:
+        - signature:
+            name: replica-print
+            parameters:
+            - name: replicas
+              default: 0
+            - name: message
+          command:
+            executable: echo
+            arguments: "%(message)s from %(replica)s"
+          workflowAttributes:
+            replicate: "%(replicas)s"
+        - signature:
+            name: print
+            parameters:
+            - name: message
+          command:
+            executable: echo
+            arguments: "%(message)s"
+          workflowAttributes:
+            aggregate: true
+        """)
+
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl)
+    flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
+
+    # VV: We can now replicate the graph and get 2 + 1 components
+    x = experiment.model.graph.WorkflowGraph.graphFromFlowIR(flowir.raw(), manifest={}, primitive=False)
+
+    _replicating_0 = x.graph.nodes['stage0.replicate0']
+    _replicating_1 = x.graph.nodes['stage0.replicate1']
+    _plain = x.graph.nodes['stage0.plain']

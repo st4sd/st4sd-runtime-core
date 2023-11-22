@@ -769,25 +769,24 @@ class CCommand(pydantic.BaseModel):
 
 def _replace_many_parameter_references(
         what: str,
-        loc: typing.List[str],
         parameters: typing.Dict[str, ParameterValueType],
-        field: typing.List[str],
         rg_parameter: typing.Optional[re.Pattern] = None,
+        ignore_parameters: typing.Optional[typing.Iterable[str]] = None,
 ) -> ParameterValueType:
     start = 0
 
     if rg_parameter is None:
         rg_parameter = re.compile(ParameterPattern)
+    ignore_parameters = ignore_parameters or {}
 
     while True:
         for match in rg_parameter.finditer(what, pos=start):
-            if match and match.group(0) != "%(replica)s":
+            # VV: Get rid of %( and )s
+            name = match.group()[2:-2]
+            if name not in ignore_parameters:
                 break
         else:
             return what
-
-        # VV: Get rid of %( and )s
-        name = match.group()[2:-2]
 
         try:
             fillin = parameters[name]
@@ -815,9 +814,10 @@ def _replace_many_parameter_references(
 
 def replace_parameter_references(
         value: ParameterValueType,
-        field: typing.List[str],
         all_scopes: typing.Dict[typing.Tuple[str], "ScopeStack.Scope"],
         location: typing.Iterable[str],
+        is_replica: bool,
+        variables: typing.Optional[typing.Dict[str, ParameterValueType]] = None
 ) -> ParameterValueType:
     """Resolves a value given the location of the owner template instance and a book of all scopes
 
@@ -827,34 +827,44 @@ def replace_parameter_references(
             The parameter value
         all_scopes:
             A collection of all known scopes
-        field:
-            the path to the field whose value is being handled
         location:
             The location of the node that owns the field
+        is_replica:
+            Whether this template could be replicating
+        variables:
+            A collection of variables that are defined in a component. When set the
+            method will skip those
     Returns:
         The resolved parameter value
     """
     rg_parameter = re.compile(ParameterPattern)
 
-    def should_resolve_more(what: ParameterValueType) -> bool:
+    def should_resolve_more(what: ParameterValueType, variables: typing.Iterable[str]) -> bool:
         if isinstance(what, (int, bool, dict)) or what is None:
             return False
 
         if isinstance(what, str):
-            match =rg_parameter.search(what)
-            return match is not None and match.group(0) != "%(replica)s"
+            match = rg_parameter.search(what)
+            if match:
+                name = match.group()[2:-2]
+                return name not in variables
+
         return False
 
     current_location = list(location)
-    while should_resolve_more(value):
+    variables = set(variables or {})
+
+    if is_replica:
+        variables.add("replica")
+
+    while should_resolve_more(value, variables):
         current_scope = all_scopes[tuple(current_location[:-1])]
         current_location.pop(-1)
         value = _replace_many_parameter_references(
             what=value,
-            loc=current_location,
             parameters=current_scope.parameters,
-            field=field,
-            rg_parameter=rg_parameter
+            rg_parameter=rg_parameter,
+            ignore_parameters=variables
         )
 
 
@@ -1037,8 +1047,9 @@ class ScopeStack:
                     self.parameters[name] = replace_parameter_references(
                         location=self.location,
                         value=value,
-                        field=["signature", "parameters", name],
                         all_scopes=all_scopes,
+                        is_replica=True,
+                        variables=None,
                     )
                 except ValueError as e:
                     errors.append(
@@ -1241,6 +1252,48 @@ class ScopeStack:
         # The values are the ScopeEntries which are effectively instances of a Template i.e.
         # The instance name, definition, and parameters of a Template
         self.scopes: typing.Dict[typing.Tuple[str], ScopeStack.Scope] = {}
+
+    def can_template_replicate(self, location: typing.Iterable[str]) -> bool:
+        """Returns whether the template can replicate
+
+        If this method returns `True` it doesn't necessarily mean that the template can replicate.
+
+        Args:
+            location:
+                The location of the template e.g.
+                - ("entry-instance", "child") - if entrypoint points to a workflow and this scope is a child of it
+                - ("entry-instance") - if entrypoint points directly to a component
+        Returns:
+            A boolean indicating whether this template can replicate
+
+        Raises:
+            KeyError:
+                If the location does not map to a known scope
+        """
+
+        location = list(location)
+
+        # VV: Iterate scopes starting from the CURRENT template and moving up till you reach:
+        # 1. an aggregating component -> replica = False
+        # 2. a POTENTIALLY replicating component -> replica = True
+        # 3. the entrypoint -> replica = False
+
+        while location:
+            scope = self.scopes[tuple(location)]
+            location = location[:-1]
+
+            if not isinstance(scope.template, Component):
+                continue
+
+            if scope.template.workflowAttributes.replicate not in ["0", 0, "", None]:
+                return True
+            elif (
+                isinstance(scope.template.workflowAttributes.aggregate, bool)
+                and scope.template.workflowAttributes.aggregate is True
+            ):
+                return False
+
+        return False
 
     def enter(
         self,
@@ -1748,12 +1801,14 @@ class ComponentFlowIR:
         environment: typing.Optional[typing.Dict[str, typing.Any]],
         scope: ScopeStack.Scope,
         errors: typing.List[Exception],
-        template_dsl_location: typing.List[typing.Union[str, int]]
+        template_dsl_location: typing.List[typing.Union[str, int]],
+        is_replica: bool,
     ):
         self.environment = environment
         self.scope = scope
         self.errors = errors
         self.template_dsl_location = list(template_dsl_location)
+        self.is_replica = is_replica
 
         self.flowir = scope.template.model_dump(
             by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True
@@ -1933,8 +1988,14 @@ class ComponentFlowIR:
         #    if the parameter is an output or data reference and the field is not meant to use either of those,
         #       then record an error
 
+        comp_flowir = self
+
         class Explore:
-            def __init__(self, location: typing.List[typing.Union[str, int]], value: typing.Any):
+            def __init__(
+                self,
+                location: typing.List[typing.Union[str, int]],
+                value: typing.Any
+            ):
                 self.location = location
                 self.value = value
 
@@ -1949,11 +2010,12 @@ class ComponentFlowIR:
             def replace_parameter_references(self, scope: ScopeStack.Scope, flowir: typing.Dict[str, typing.Any]):
                 new_value = replace_parameter_references(
                     self.value,
-                    field=self.location,
                     location=scope.location + ["inner field"],
                     all_scopes={
                         tuple(scope.location): scope
-                    }
+                    },
+                    is_replica=comp_flowir.is_replica,
+                    variables=comp_flowir.scope.template.variables,
                 )
 
                 if new_value != self.value:
@@ -2111,7 +2173,11 @@ def namespace_to_flowir(
                     template_dsl_location = ["components", idx]
                     break
 
-            comp_flowir = digest_dsl_component(scope=scope, template_dsl_location=template_dsl_location)
+            comp_flowir = digest_dsl_component(
+                scope=scope,
+                template_dsl_location=template_dsl_location,
+                scopes = scopes
+            )
             errors.extend(comp_flowir.errors)
             components[tuple(scope.location)] = comp_flowir
 
@@ -2219,7 +2285,8 @@ def namespace_to_flowir(
 
 def digest_dsl_component(
     scope: ScopeStack.Scope,
-    template_dsl_location: typing.List[typing.Union[str, int]]
+    template_dsl_location: typing.List[typing.Union[str, int]],
+    scopes: ScopeStack,
 ) -> ComponentFlowIR:
     """Utility method to generate information that the caller can use to put together a FlowIRConcrete instance
 
@@ -2243,11 +2310,16 @@ def digest_dsl_component(
             the component Template, its parameters to instantiate it, and its unique location (uid)
         template_dsl_location:
             the path to the DSL field that contains the component template
+        scopes:
+            all scope instances
 
     Returns:
         Information necessary to produce FlowIR from a Component in the form of ComponentFlowIR and a collection of
         errors. If there's more than 1 error, the information in the ComponentFlowIR may be incomplete
     """
+
+    is_replica = scopes.can_template_replicate(location=scope.location)
+
     if not isinstance(scope.template, Component):
         exc = ValueError(f"Node {scope.location} was expected to be a Component not a {scope.template}")
         exc = experiment.model.errors.DSLInvalidFieldError(location=scope.dsl_location(), underlying_error=exc)
@@ -2257,6 +2329,7 @@ def digest_dsl_component(
             environment=None,
             scope=scope,
             template_dsl_location=template_dsl_location,
+            is_replica=is_replica
         )
 
     environment = None
@@ -2298,7 +2371,8 @@ def digest_dsl_component(
         errors=errors,
         environment=environment,
         scope=scope,
-        template_dsl_location=template_dsl_location
+        template_dsl_location=template_dsl_location,
+        is_replica=is_replica,
     )
 
     return ret

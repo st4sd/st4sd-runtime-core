@@ -25,7 +25,8 @@ setup(
     # Versions should comply with PEP440.  For a discussion on single-sourcing
     # the version across setup.py and the project code, see
     # https://packaging.python.org/en/latest/single_source_version.html
-    version='1.0.0',
+    # VV: If this field is set, `setuptools_scm` in python 3.10 does not discover the package version
+    # version='2.0.0',
 
     description='A tool for creating and deploying computational experiments',
     long_description=long_description,

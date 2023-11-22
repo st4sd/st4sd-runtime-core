@@ -30,9 +30,28 @@ from .test_dsl import (
 logger = logging.getLogger('test')
 
 
+def test_load_dsl2_from_json(output_dir, dsl_one_workflow_one_component_one_step_no_datareferences):
+    dsl = experiment.model.frontends.dsl.Namespace(**dsl_one_workflow_one_component_one_step_no_datareferences)\
+        .model_dump_json(by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True)
+
+    path = os.path.join(output_dir, "dsl.json")
+    with open(path, 'w') as f:
+        f.write(dsl)
+
+    instance_dir = os.path.join(output_dir, "package.instance")
+    os.makedirs(instance_dir)
+    isValid, error, compExperiment = experiment.test.ValidatePackage(path, location=instance_dir)
+
+    assert isValid
+    assert error is None
+
+    # VV: Now make sure that the package is valid - perform check_executable checks too
+    compExperiment.validateExperiment(ignoreTestExecutablesError=False)
+
+
 def test_load_dsl2(output_dir, dsl_one_workflow_one_component_one_step_no_datareferences):
     dsl = experiment.model.frontends.dsl.Namespace(**dsl_one_workflow_one_component_one_step_no_datareferences)\
-        .dict(by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True)
+        .model_dump(by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True)
 
     pkg_dir = os.path.join(output_dir, "workflow.package")
     utils.populate_files(pkg_dir, {"conf/dsl.yaml": yaml.safe_dump(dsl)})

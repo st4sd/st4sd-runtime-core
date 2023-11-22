@@ -562,11 +562,6 @@ class ExperimentPackage(StorageStructurePathResolver):
                     f"{self.configuration.isExperimentPackageDirectory}, manifest: {self.manifestData}")
 
         if not self.configuration.isExperimentPackageDirectory:
-            packagePathBaseName = os.path.basename(path)
-            packageName, packageExtension = os.path.splitext(packagePathBaseName)
-            if packageExtension not in [".yaml", ".yml"]:
-                raise experiment.model.errors.PackageStructureError(path)
-
             try:
                 if manifest:
                     logger.info("Loaded manifest %s" % pprint.pformat(manifest))

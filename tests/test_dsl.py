@@ -1259,3 +1259,57 @@ def test_validate_dsl_with_replicas():
     _replicating_0 = x.graph.nodes['stage0.replicate0']
     _replicating_1 = x.graph.nodes['stage0.replicate1']
     _plain = x.graph.nodes['stage0.plain']
+
+
+def test_nanopore_parse():
+    dsl = yaml.safe_load("""
+    entrypoint:
+      entry-instance: main
+      execute:
+      - args:
+          input.cif_files.dat: input/cif_files.dat
+          numberOfNanopores: 3
+    workflows:
+    - signature:
+        name: main
+        parameters:
+        - name: input.cif_files.dat
+        - name: manifest.nanopore-database
+          default: nanopore-database
+        - name: numberOfNanopores
+          default: 3
+      steps:
+        stage0.GetNanoporeSource: stage0.GetNanoporeSource
+      execute:
+      - target: <stage0.GetNanoporeSource>
+        args:
+          numberOfNanopores: '%(numberOfNanopores)s'
+          param0: '%(input.cif_files.dat)s:ref'
+    components:
+    - signature:
+        name: stage0.GetNanoporeSource
+        parameters:
+        - name: param0
+        - name: numberOfNanopores
+      command:
+        executable: sed
+        interpreter: bash
+        arguments: -n "$((%(replica)s+1)),+0p" %(param0)s | awk -F "/" '{print $1}'
+        expandArguments: none
+      workflowAttributes:
+        replicate: '%(numberOfNanopores)s'
+        repeatRetries: 3
+      resourceManager:
+        config:
+          walltime: 14400.0
+      variables:
+        replica: '%(numberOfNanopores)s'
+    """)
+
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl)
+    flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
+
+    comp = flowir.get_component((0, "GetNanoporeSource"))
+
+    assert comp['command']['arguments'] == ('-n "$((%(replica)s+1)),+0p" input/cif_files.dat:ref '
+                                            '| awk -F "/" \'{print $1}\'')

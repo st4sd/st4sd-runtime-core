@@ -844,10 +844,11 @@ def replace_parameter_references(
             return False
 
         if isinstance(what, str):
-            match = rg_parameter.search(what)
-            if match:
+            for match in rg_parameter.finditer(what):
                 name = match.group()[2:-2]
-                return name not in variables
+                if name not in variables:
+                    return True
+            return False
 
         return False
 
@@ -1986,8 +1987,6 @@ class ComponentFlowIR:
         The method updates @errors with any problems it identifies
         """
 
-        can_have_data_output_references = [["command", "arguments"]]
-
         # VV: Algorithm:
         # 1. Walk the FlowIR fields
         # 2. if a field is a string and it is referencing a parameter substitute the parameter reference with the
@@ -2015,10 +2014,16 @@ class ComponentFlowIR:
 
                 where[self.location[-1]] = new_value
 
-            def replace_parameter_references(self, scope: ScopeStack.Scope, flowir: typing.Dict[str, typing.Any]):
+            def replace_parameter_references(
+                    self,
+                    scope: ScopeStack.Scope,
+                    flowir: typing.Dict[str, typing.Any],
+                    field: typing.Iterable[typing.Union[str, int]],
+            ):
+
                 new_value = replace_parameter_references(
                     self.value,
-                    location=scope.location + ["inner field"],
+                    location=scope.location + ["inner_field"],
                     all_scopes={
                         tuple(scope.location): scope
                     },
@@ -2038,7 +2043,11 @@ class ComponentFlowIR:
                         location = node.location + [key]
                         pending.insert(0, Explore(location=location, value=value))
                 elif isinstance(node.value, str):
-                    node.replace_parameter_references(scope=self.scope, flowir=self.flowir)
+                    node.replace_parameter_references(
+                        scope=self.scope,
+                        flowir=self.flowir,
+                        field=node.location,
+                    )
                 elif isinstance(node.value, list):
                     for idx, value in enumerate(node.value):
                         location = node.location + [idx]
@@ -2363,7 +2372,7 @@ def digest_dsl_component(
 
     if isinstance(check_environment, dict):
         environment = check_environment
-    elif check_environment is "none":
+    elif check_environment == "none":
         environment = {}
     elif check_environment is None:
         environment = None

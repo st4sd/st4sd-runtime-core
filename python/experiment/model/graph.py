@@ -425,10 +425,10 @@ def _dsl_parameter_name_from_external_reference(ref: str) -> ExternalReferencePa
 
     Examples: ::
 
-        func("input/foo.txt:ref") -> name=input.foo.txt and value="%(input.foo.txt)":ref
-        func("data/foo.txt:ref") -> name=data.foo.txt and value="%(data.foo.txt)":ref
-        func("foo:ref") -> name=manifest.foo and value="%(manifest.foo)s":ref
-        func("foo/bar.txt:ref") -> name=manifest.foo and value="%(manifest.foo)s/bar.txt":ref
+        func("input/foo.txt:ref") -> name=input.foo.txt and value=%(input.foo.txt):ref
+        func("data/foo.txt:ref") -> name=data.foo.txt and value=%(data.foo.txt):ref
+        func("foo:ref") -> name=manifest.foo and value=%(manifest.foo)s:ref
+        func("foo/bar.txt:ref") -> name=manifest.foo and value=%(manifest.foo)s/bar.txt:ref
 
     Arguments:
         ref: A string representation of a DataReference
@@ -447,15 +447,15 @@ def _dsl_parameter_name_from_external_reference(ref: str) -> ExternalReferencePa
             param_name = '.'.join((producer, filename))
         else:
             param_name = producer
-        value = f'"%({param_name})s":{method}'
+        value = f'%({param_name})s:{method}'
         return ExternalReferenceParameter(name=param_name, value=value, entrypoint=entrypoint)
     else:
         producer = '.'.join(("manifest", directory))
 
         if filename:
-            value = f'"%({producer})s/{filename}":{method}'
+            value = f'%({producer})s/{filename}:{method}'
         else:
-            value = f'"%({producer})s":{method}'
+            value = f'%({producer})s:{method}'
         return ExternalReferenceParameter(name=producer, value=value, entrypoint=entrypoint)
 
 
@@ -465,9 +465,11 @@ class ComponentIdentifier:
 
     NB: Currently $namespace is assumed to be of form stage$NUM'''
 
-    def __init__(self, name, # type: str
-                 index=None  # type: int
-                 ):
+    def __init__(
+        self,
+        name: str,
+        index: Optional[int] = None
+    ):
 
         '''
 

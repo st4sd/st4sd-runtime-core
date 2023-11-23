@@ -1747,13 +1747,21 @@ class ScopeStack:
                 If the template that the entrypoint points to contains grammar errors
         """
         scope_stack = cls()
+        errors = []
+
+        # VV: report any naming conflicts between parameters (and variables for components)
+        for (col_label, collection) in [("workflows", namespace.workflows), ("components", namespace.components)]:
+            for (idx, template) in enumerate(collection):
+                dsl_location = [col_label, idx]
+                try:
+                    discover_parameter_conflicts(template=template, dsl_location=dsl_location)
+                except experiment.model.errors.DSLInvalidError as e:
+                    errors.extend(e.underlying_errors)
 
         scope_stack.discover_all_instances_of_templates(
             namespace=namespace,
             override_entrypoint_args=override_entrypoint_args
         )
-
-        errors = []
 
         def resolve_scope(
             scope: ScopeStack.Scope,
@@ -2376,3 +2384,44 @@ def digest_dsl_component(
     )
 
     return ret
+
+
+def discover_parameter_conflicts(
+    template: typing.Union[Component, Workflow],
+    dsl_location: typing.Iterable[typing.Union[str, int]],
+):
+    """Discovers naming conflicts in parameters (and variables) of a Template
+
+    Args:
+        template:
+            The template definition, can be a Workflow or a Component. The later may have variables
+        dsl_location:
+            The location that the DSL defines the template, used to return pretty errors
+
+    Raises:
+        experiment.model.errors.DSLInvalidError:
+            A collection of errors
+    """
+
+    parameters = set()
+    errors = []
+    dsl_location = list(dsl_location)
+
+    for (idx, p) in enumerate(template.signature.parameters):
+        if p.name in parameters:
+            errors.append(experiment.model.errors.DSLInvalidFieldError(
+                location=dsl_location + ["parameters", idx, "name"],
+                underlying_error=ValueError(f"Parameter {p.name} is already defined")
+            ))
+        parameters.add(p.name)
+
+    if isinstance(template, Component):
+        for name in template.variables:
+            if name in parameters:
+                errors.append(experiment.model.errors.DSLInvalidFieldError(
+                    location=dsl_location + ["variables", name],
+                    underlying_error=ValueError(f"There is a parameter with the same name as the variable")
+                ))
+
+    if errors:
+        raise experiment.model.errors.DSLInvalidError.from_errors(errors)

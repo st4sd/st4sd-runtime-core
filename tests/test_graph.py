@@ -376,8 +376,8 @@ def test_graph_generate_new_dsl_workflow_one_component():
             'target': '<stage0.hello>',
             'args': {
                 'from-platform': '%(from-platform)s',
-                'param0': '"%(manifest.dataset)s":ref',
-                'param1': '"%(manifest.fromManifest)s":ref'
+                'param0': '%(manifest.dataset)s:ref',
+                'param1': '%(manifest.fromManifest)s:ref'
             }
         }
     ]
@@ -458,8 +458,8 @@ def test_graph_generate_new_dsl_workflow_two_components():
             'target': '<stage0.hello>',
             'args': {
                 'from-platform': '%(from-platform)s',
-                'param0': '"%(manifest.dataset)s":ref',
-                'param1': '"%(manifest.fromManifest)s":ref'
+                'param0': '%(manifest.dataset)s:ref',
+                'param1': '%(manifest.fromManifest)s:ref'
             }
         },
         {
@@ -533,9 +533,9 @@ def test_graph_generate_new_dsl_workflow_one_component_input_file():
             'target': '<stage0.hello>',
             'args': {
                 'from-platform': '%(from-platform)s',
-                'param0': '"%(manifest.dataset)s":ref',
-                'param1': '"%(manifest.fromManifest)s":ref',
-                'param2': '"%(input.hi)s":ref'
+                'param0': '%(manifest.dataset)s:ref',
+                'param1': '%(manifest.fromManifest)s:ref',
+                'param2': '%(input.hi)s:ref'
             }
         }
     ]
@@ -615,8 +615,8 @@ def test_graph_generate_new_dsl_workflow_one_component_and_platform():
         'args': {
             'from-platform': '%(from-platform)s',
             'another-var': '%(another-var)s',
-            'param0': '"%(manifest.dataset)s":ref',
-            'param1': '"%(manifest.fromManifest)s":ref'
+            'param0': '%(manifest.dataset)s:ref',
+            'param1': '%(manifest.fromManifest)s:ref'
         }
     }
 
@@ -716,10 +716,10 @@ def test_graph_generate_new_dsl_workflow_double_reference_workflow_parameter():
         'target': '<stage0.hello>',
         'args': {
             'backend': '%(backend)s',
-            'param0': '"%(manifest.dataset)s":ref',
-            'param1': '"%(input.msg.txt)s":ref',
-            'param2': '"%(input.msg.txt)s":copy',
-            'param3': '"%(data.other.txt)s":copy',
+            'param0': '%(manifest.dataset)s:ref',
+            'param1': '%(input.msg.txt)s:ref',
+            'param2': '%(input.msg.txt)s:copy',
+            'param3': '%(data.other.txt)s:copy',
         }
     }
 

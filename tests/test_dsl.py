@@ -1174,6 +1174,39 @@ def test_validate_dsl_with_variables():
     assert flowir['components'][0]['command']['arguments'] == "%(greeting)s"
 
 
+def test_validate_dsl_with_conflicting_variables_and_parameters():
+    dsl = yaml.safe_load("""
+        entrypoint:
+          entry-instance: bad
+          execute:
+          - target: "<entry-instance>"
+        components:
+        - signature:
+            name: bad
+            parameters:
+            - name: greeting
+              default: hello
+          command:
+            executable: echo
+            arguments: "%(greeting)s"
+          variables:
+            greeting: "hi"
+        """)
+
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl)
+    with pytest.raises(experiment.model.errors.DSLInvalidError) as e:
+        experiment.model.frontends.dsl.namespace_to_flowir(namespace)
+
+    exc = e.value
+    assert isinstance(e.value, experiment.model.errors.DSLInvalidError)
+    assert exc.errors() == [
+        {
+            'loc': ['components', 0, 'variables', 'greeting'],
+            'msg': 'There is a parameter with the same name as the variable'
+         }
+    ]
+
+
 def test_validate_dsl_with_replicas():
     dsl = yaml.safe_load("""
         entrypoint:

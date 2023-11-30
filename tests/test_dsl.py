@@ -770,9 +770,8 @@ def dsl_conflicting_templates() -> typing.Dict[str, typing.Any]:
 
 def test_dsl_conflicting_templates(dsl_conflicting_templates: typing.Dict[str, typing.Any]):
     namespace = experiment.model.frontends.dsl.Namespace(**dsl_conflicting_templates)
-    scopes = experiment.model.frontends.dsl.ScopeStack()
     with pytest.raises(experiment.model.errors.DSLInvalidError) as e:
-        scopes.discover_all_instances_of_templates(namespace)
+        experiment.model.frontends.dsl.lightweight_validate(namespace)
 
     assert e.value.errors() == [
         {'loc': ['workflows', 1], 'msg': 'There already is a Workflow template called main'},
@@ -788,11 +787,9 @@ def test_dsl_nested_workflows(dsl_nested_workflows: typing.Dict[str, typing.Any]
 
 def test_detect_cycle(dsl_with_cycle: typing.Dict[str, typing.Any]):
     namespace = experiment.model.frontends.dsl.Namespace(**dsl_with_cycle)
-    scopes = experiment.model.frontends.dsl.ScopeStack()
-
 
     with pytest.raises(experiment.model.errors.DSLInvalidError) as e:
-        scopes.discover_all_instances_of_templates(namespace)
+        experiment.model.frontends.dsl.lightweight_validate(namespace)
 
     exc = e.value
 
@@ -1313,3 +1310,56 @@ def test_nanopore_parse():
 
     assert comp['command']['arguments'] == ('-n "$((%(replica)s+1)),+0p" input/cif_files.dat:ref '
                                             '| awk -F "/" \'{print $1}\'')
+
+
+def test_lightweight_validation_missing_variables():
+    dsl = yaml.safe_load("""
+    components:
+    - signature:
+        name: foo
+      command:
+        executable: bar
+      workflowAttributes:
+        replicate: "%(replicas)s"
+    """)
+
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl)
+
+    with pytest.raises(experiment.model.errors.DSLInvalidError) as e:
+        experiment.model.frontends.dsl.lightweight_validate(namespace)
+
+    errors = e.value.errors()
+
+    assert errors == [
+        {
+            "loc": ["components", 0, "workflowAttributes", "replicate"],
+            "msg": 'Reference to unknown parameter or variable "replicas"'
+        }
+    ]
+
+
+def test_lightweight_validation_parameter_referencing_variable():
+    dsl = yaml.safe_load("""
+    components:
+    - signature:
+        name: foo
+        parameters:
+        - name: hello
+          default: "%(something)s"
+      command:
+        executable: bar
+    """)
+
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl)
+
+    with pytest.raises(experiment.model.errors.DSLInvalidError) as e:
+        experiment.model.frontends.dsl.lightweight_validate(namespace)
+
+    errors = e.value.errors()
+
+    assert errors == [
+        {
+            "loc": ["components", 0, "signature", "parameters", 0, "default"],
+            "msg": 'Reference to parameter/variable "something"'
+        }
+    ]

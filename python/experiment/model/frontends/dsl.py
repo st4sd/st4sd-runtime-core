@@ -1322,12 +1322,17 @@ class ScopeStack:
             template_location=template_location,
         )
 
-        for p in template.signature.parameters:
+        for i in range(len(template.signature.parameters)):
+            p = template.signature.parameters[i] # VV: type hints ...
+
             if p.name in parameters:
                 continue
             if "default" not in p.model_fields_set:
-                errors.append(ValueError(f"The parameter {p.name} in location {'/'.join(location)} "
-                                         f"does not have a value or default"))
+                errors.append(experiment.model.errors.DSLInvalidFieldError(
+                    scope_entry.dsl_location() + ["signature", "parameters", i],
+                    ValueError(f"The parameter {p.name} in location {'/'.join(location)} does not have a value or default")
+                ))
+
         if errors:
             dsl_error = experiment.model.errors.DSLInvalidError([])
             for e in errors:
@@ -2490,8 +2495,8 @@ def lightweight_validate(
     ) -> typing.List[experiment.model.errors.DSLInvalidFieldError]:
         errors = []
 
-        for idx in range(len(template.signature.parameters)):
-            param = comp.signature.parameters[idx]
+        for i in range(len(template.signature.parameters)):
+            param = template.signature.parameters[i]
 
             if not param.default:
                 continue
@@ -2501,12 +2506,27 @@ def lightweight_validate(
             for r in refs:
                 errors.append(
                     experiment.model.errors.DSLInvalidFieldError(
-                        location=location + ["signature", "parameters", idx, "default"],
+                        location=location + ["signature", "parameters", i, "default"],
                         underlying_error=ValueError(
                             f'Reference to parameter/variable "{r}"'
                         )
                     )
                 )
+
+        return errors
+
+    def detect_missing_fields(
+            comp: Component,
+            index: int
+    ) -> typing.List[experiment.model.errors.DSLInvalidFieldError]:
+        comp_location = ["components", index]
+        errors = []
+
+        if not comp.command.executable and not comp.command.interpreter:
+            errors.append(experiment.model.errors.DSLInvalidFieldError(
+                comp_location + ["command"],
+                ValueError("The component does not specify command.executable or command.interpreter"))
+            )
 
         return errors
 
@@ -2587,6 +2607,7 @@ def lightweight_validate(
         # VV: enumerate messes up typehints
         comp = namespace.components[idx]
         errors_acc.extend(detect_unknown_variables(comp, idx))
+        errors_acc.extend(detect_missing_fields(comp, idx))
 
     for idx in range(len(namespace.workflows)):
         # VV: enumerate messes up typehints

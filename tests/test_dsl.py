@@ -1363,3 +1363,104 @@ def test_lightweight_validation_parameter_referencing_variable():
             "msg": 'Reference to parameter/variable "something"'
         }
     ]
+
+
+def test_lightweight_validation_missing_exec():
+    dsl = yaml.safe_load("""
+        components:
+        - signature:
+            name: normalize
+            parameters:
+            - name: input
+            - name: parameter
+        - command:
+            arguments: serious science stuff here
+            executable: echo
+          signature:
+            name: simulation-a
+            parameters:
+            - name: data
+        - command:
+            arguments: '%(input)s'
+            executable: echo
+          signature:
+            description: null
+            name: simulation-b
+            parameters:
+            - name: input
+        entrypoint:
+          entry-instance: simulate-and-report
+          execute:
+          - args: {}
+            target: <entry-instance>
+        workflows:
+        - execute:
+          - args:
+              data: '%(some-data)s'
+            target: <simulation>
+          - args:
+              input: <simulation/second-stage>:ref
+              some-parameter: '%(some-parameter)s'
+            target: <analysis>
+          signature:
+            description: You can type text here to help other people use your workflow. For
+              example you can explain what kind of inputs it expects, where people can go
+              to find more information about this etc.
+            name: simulate-and-report
+            parameters:
+            - name: some-data
+            - name: some-parameter
+          steps:
+            analysis: analysis
+            simulation: simulation
+        - execute:
+          - args:
+              input: '%(input)s'
+              parameter: '%(some-parameter)s'
+            target: <normalize>
+          signature:
+            description: null
+            name: analysis
+            parameters:
+            - name: input
+            - name: some-parameter
+          steps:
+            normalize: normalize
+        - execute:
+          - args:
+              data: '%(data)s'
+            target: <first-stage>
+          - args:
+              input: <first-stage>:ref
+            target: <second-stage>
+          signature:
+            description: null
+            name: simulation
+            parameters:
+            - name: data
+          steps:
+            first-stage: simulation-a
+            second-stage: simulation-b
+            """)
+
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl)
+
+    with pytest.raises(experiment.model.errors.DSLInvalidError) as e:
+        experiment.model.frontends.dsl.lightweight_validate(namespace)
+
+    errors = e.value.errors()
+
+    assert errors == [
+        {
+            "loc": ["components", 0, "command"],
+            "msg": 'The component does not specify command.executable or command.interpreter'
+        },
+        {
+            "loc": ["workflows", 0, "signature", "parameters", 0],
+            "msg": 'The parameter some-data in location entry-instance does not have a value or default'
+        },
+        {
+            "loc": ["workflows", 0, "signature", "parameters", 1],
+            "msg": 'The parameter some-parameter in location entry-instance does not have a value or default'
+        }
+    ]

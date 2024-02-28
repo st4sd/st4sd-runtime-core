@@ -125,7 +125,9 @@ def get_pvep_from_url(ctx: typer.Context, url: HttpUrl, from_context: Optional[s
 
     #
     if from_context is not None and pvep is None:
-        context_url = f"{url.scheme}://{url.host}"
+        # AP 28/02/2024:
+        #   We also add / as the path as Pydantic will add it
+        context_url = f"{url.scheme}://{url.host}/"
         token = keyring.get_password(context_url, from_context)
         if token is None:
             stderr.print(
@@ -237,7 +239,7 @@ def push(
     url = config.contexts.entries.get(active_context_name).url
     exp_name = pvep["metadata"]["package"]["name"]
     stdout.print(f"You can find the PVEP at:")
-    stdout.print(f"{url}/registry-ui/experiment/{exp_name}")
+    stdout.print(f"{url}registry-ui/experiment/{exp_name}")
 
 
 @app.command(
@@ -368,7 +370,7 @@ def import_experiment(
     active_context_name = config.settings.default_context
     url = config.contexts.entries.get(active_context_name).url
     stdout.print(f"You can find the imported PVEP at:")
-    stdout.print(f"{url}/registry-ui/experiment/{exp_name}")
+    stdout.print(f"{url}registry-ui/experiment/{exp_name}")
 
 
 @app.command(

@@ -81,15 +81,22 @@ def login(
         config.settings.verbose = verbose
 
     # The validation will fail if the url does not start with a correct schema
-    url = url.strip("/").lower()
+    # AP 28/02/2024:
+    #   Removing the .strip("/") call as Pydantic now automatically adds /
+    #   as part of the host of the URL.
+    url = url.lower()
     if not url.startswith("http"):
         url = f"https://{url}"
 
     # Rewrite the URL by stripping e.g., path and query
+    # This helps us in case we need to generate the authentication token url
+    # in theory a user could attempt to log in using an experiment URL
+    # AP 28/02/2024:
+    #   We also add / as the path as Pydantic will add it
     try:
         pydantic_url = pydantic.parse_obj_as(HttpUrl, url)
-        url = f"{pydantic_url.scheme}://{pydantic_url.host}"
-        if pydantic_url.port not in ["80", "443"]:
+        url = f"{pydantic_url.scheme}://{pydantic_url.host}/"
+        if str(pydantic_url.port) not in ["80", "443"]:
             url += f":{pydantic_url.port}"
     except ValidationError as e:
         stderr.print(
@@ -104,7 +111,7 @@ def login(
 
     # Ask the user to provide an access token once
     if access_token == "":
-        authorization_url = f"{url}/authorisation/token"
+        authorization_url = f"{url}authorisation/token"
         stderr.print("You need to provide an access token to connect to this instance.")
         stderr.print(f"You can get one at {authorization_url}")
 
@@ -146,7 +153,9 @@ def login(
             )
 
         # Check if the URL saved matches
-        if config.contexts.entries.get(context_name).url != url:
+        # AP 28/02/2024:
+        #   The comparison doesn't work anymore, need to cast to string
+        if str(config.contexts.entries.get(context_name).url) != url:
             if config.settings.verbose:
                 stdout.print(
                     "[yellow]Warn:[/yellow]\tThe URL provided does not match the one that is saved"

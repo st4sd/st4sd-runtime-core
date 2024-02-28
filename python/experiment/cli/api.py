@@ -42,11 +42,13 @@ def get_api(ctx: typer.Context, for_context: str = None):
         raise typer.Exit(code=STPExitCodes.CONTEXT_ERROR)
 
     # Check we have credentials for the context
+    url = str(url)
     token = keyring.get_password(url, active_context_name)
     if token is None:
         stderr.print(
             f"[red]Error:[/red]\tNo token could be found for context {active_context_name}\n"
-            "[italic]Tip:\tRun [blue]stp login[/blue] to set one[/italic]"
+            "[italic]Tip:\t"
+            f"Run [blue]stp login --context-name {active_context_name} {url}[/blue] to set one[/italic]"
         )
         raise typer.Exit(code=STPExitCodes.CONTEXT_ERROR)
 

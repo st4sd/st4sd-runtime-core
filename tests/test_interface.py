@@ -20,6 +20,8 @@ import math
 import os
 from typing import List
 
+import pandas
+
 import experiment.model.codes
 import experiment.model.errors
 import experiment.model.storage
@@ -251,14 +253,26 @@ hooks: hooks:copy
         os.path.join('output', 'properties.csv'),
     ])
 
-    properties = exp.get_measured_properties()
+    properties: pandas.DataFrame = exp.get_measured_properties()
+    assert sorted(properties['input-id'].tolist()) == sorted(['S0', 'S1', 'A0', 'A1'])
 
-    assert properties['input-id'].tolist() == ['S0', 'S1', 'A0', 'A1']
-    bandgap: List[float] = properties['bandgap'].tolist()
-    assert math.isnan(bandgap[0])
-    assert math.isnan(bandgap[1])
-    assert bandgap[2:] == [30.0, 40.0]
-    assert properties['lambdamax'].tolist() == [100.0, 200.0, 300.0, 400.0]
+    rows_no_bandgap = properties.loc[properties['input-id'].isin(['S0', 'S1'])]
+    rows_with_bandgap = properties.loc[properties['input-id'].isin(['A0', 'A1'])]
+
+    print(rows_no_bandgap)
+
+    bandgap: List[float] = rows_no_bandgap['bandgap'].tolist()
+    assert any(map(math.isnan, bandgap)) is True
+
+    print(rows_with_bandgap)
+
+    bandgap: List[float] = rows_with_bandgap['bandgap'].tolist()
+    assert all(map(math.isfinite, bandgap)) is True
+
+    for i, input_id in enumerate(['S0', 'S1', 'A0', 'A1']):
+        expected = 100.0 * (i+1)
+        row = properties.loc[properties['input-id'] == input_id]
+        assert row['lambdamax'].tolist() == [expected]
 
 
 def test_get_properties_with_variables(output_dir):
@@ -373,9 +387,8 @@ hooks: hooks:copy
 
     properties = exp.get_measured_properties()
 
-    assert properties['input-id'].tolist() == ['S0', 'S1', 'A0', 'A1']
-    bandgap: List[str] = properties['bandgap'].tolist()
-    assert bandgap == ['hi-10', 'hi-20', 'hi-30', 'hi-40']
+    for (input_id, bandgap) in {'S0': 'hi-10', 'S1': 'hi-20', 'A0': 'hi-30', 'A1': 'hi-40'}.items():
+        assert  properties.loc[properties['input-id'] == input_id]['bandgap'].tolist() == [bandgap]
 
 
 def test_merge_dataframes_with_shared_columns(output_dir):

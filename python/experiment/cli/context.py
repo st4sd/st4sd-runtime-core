@@ -57,7 +57,7 @@ def list_contexts(
         for context in config.contexts.entries.keys():
             if show_url:
                 stdout.print(
-                    f"{context.lower()}\t{config.contexts.entries[context].url}"
+                    f"{context.lower()}\t{str(config.contexts.entries[context].url)}"
                 )
             else:
                 stdout.print(context.lower())
@@ -69,7 +69,7 @@ def list_contexts(
     for context in config.contexts.entries.keys():
         if show_url:
             contexts_table.add_row(
-                context.lower(), config.contexts.entries[context].url
+                context.lower(), str(config.contexts.entries[context].url)
             )
         else:
             contexts_table.add_row(context.lower())
@@ -123,7 +123,7 @@ def show(
 
     if show_url:
         stdout.print(
-            f"{config.settings.default_context.lower()}\t{config.contexts.entries[config.settings.default_context].url}"
+            f"{config.settings.default_context.lower()}\t{str(config.contexts.entries[config.settings.default_context].url)}"
         )
     else:
         stdout.print(config.settings.default_context)

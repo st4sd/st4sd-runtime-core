@@ -87,6 +87,7 @@ setup(
     # $ pip install -e .[dev,test]
     extras_require={
         'deploy': ['jupyter', 'paho-mqtt'],
+        'develop': ['jupyter', 'paho-mqtt'],
     },
 
     # If there are data files included in your packages that need to be

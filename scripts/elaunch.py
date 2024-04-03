@@ -195,25 +195,35 @@ SetupReturnType = Tuple[SetupExceptions, Optional[experiment.model.data.Experime
                             experiment.runtime.output.StatusMonitor]]
 
 
-def extract_application_dependency_source(options):
-    # type: (optparse.Values) -> Dict[str, str]
+
+def extract_application_dependency_source(app_dep_sources: List[str], package_path: str) -> Dict[str, str]:
     """Parses --applicationDependencySource commandline arguments (`applicationDependencyEntry:/path/to/new/source`)
 
     Args:
-        options(optparse.Values): commandline arguments to elaunch
+        app_dep_sources:
+            A list of $appDepSourceName(=:)/path/to/new/source[:optional link or copy]
+        package_path:
+            Path to the package that's being loaded
 
     Returns
         A dictionary whose keys are application dependency names and values are absolute paths
     """
     application_dependency_source = {}  # type: Dict[str, str]
 
-    for s in options.application_dependency_source:
+    for app_and_src in app_dep_sources or []:
         try:
-            app_dep, new_source = s.split(':', 1)
+            app_dep, new_source = app_and_src.split('=', 1)
         except ValueError:
-            raise ValueError('Application dependency source "%s" does not have the format '
-                             '`applicationDependencyEntry:/path/to/new/source`' % s)
-        application_dependency_source[app_dep] = new_source
+            try:
+                app_dep, new_source = app_and_src.split(':', 1)
+            except ValueError:
+                raise ValueError('Application dependency source "%s" does not have the format '
+                                 '`applicationDependencyEntry:/path/to/new/source`' % s)
+        if new_source.startswith("%(package)s"):
+            new_source = new_source.replace("%(package)s", package_path)
+
+        application_dependency_source[app_dep] = os.path.abspath(new_source)
+
     return application_dependency_source
 
 
@@ -252,7 +262,10 @@ def Setup(setupPath, options):
     compExperiment = None
     rootLogger = None
 
-    custom_application_sources = extract_application_dependency_source(options)
+    custom_application_sources = extract_application_dependency_source(
+        options.application_dependency_source,
+        package_path=setupPath
+    )
 
     if options.restart is None:
         packagePath = setupPath
@@ -1259,10 +1272,13 @@ def build_parser() -> NoSystemExitOptparseOptionParser:
                                   "considered a security risk and should be avoided. Default is No.")
     launchOptions.add_option("-s", "--applicationDependencySource", dest="application_dependency_source",
                              help="Point an application dependency to a specific "
-                                  "path on the filesystem `applicationDependencyEntry:/path/to/new/source[:link/:copy]`"
-                                  "The :link and :copy suffixes determine whether to link or copy the path under the "
-                                  "instance directory. They suffix is optional and defaults to :link. If the path "
-                                  "contains a ':' character, use '%3A' instead (i.e. url-encode the : character)",
+                                  "path on the filesystem `applicationDependencyEntry=/path/to/new/source[:link/:copy]`"
+                                  ". The :link and :copy suffixes determine whether to link or copy the path under the "
+                                  "instance directory. The suffix is optional and defaults to :link. If the path "
+                                  "contains a ':' character, use '%3A' instead (i.e. url-encode the : character). "
+                                  "You may also use `:` to separate the name of the application dependency entry "
+                                  "and its path. Finally, if the path starts with '%(package)s' then elaunch.py "
+                                  "resolves that reference to the package path.",
                              default=[], metavar="APPLICATION_DEPENDENCY_SOURCE", action="append")
     launchOptions.add_option('', '--manifest', dest="manifest", metavar="PATH_TO_MANIFEST_FILE", default=None,
                              help="Optional path to manifest YAML file to use when setting up package directory from a "
@@ -1826,7 +1842,10 @@ if __name__ == "__main__":
         LivePatcher.initial_stage = initial_stage
         LivePatcher.format_priority = list(options.formatPriority)
         LivePatcher.platform_name = options.platform or experiment.model.frontends.flowir.FlowIR.LabelDefault
-        LivePatcher.custom_application_sources = extract_application_dependency_source(options)
+        LivePatcher.custom_application_sources = extract_application_dependency_source(
+            options.application_dependency_source,
+            package_path=packagePath
+        )
 
         signal.signal(signal.SIGALRM, lambda _signal, frame: live_patch_trigger())
 

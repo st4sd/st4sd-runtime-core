@@ -79,7 +79,7 @@ setup(
                       'networkx', 'matplotlib', 'requests', 'six', 'kubernetes', 'psutil', 'boto3',
                       'pyrsistent', 'js2py', 'pymongo>=4.0', 'papermill', 'pandas', 'future', 'pydantic>=2.0.0',
                       'pydantic-settings',
-                      'keyring', 'typer[all]', 'jsonschema'], #, 'pygraphviz'],
+                      'keyring', 'typer>=0.12.3', 'jsonschema'], #, 'pygraphviz'],
 
     # List additional groups of dependencies here (e.g. development
     # dependencies). You can install these using the following syntax,

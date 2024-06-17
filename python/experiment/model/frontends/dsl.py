@@ -130,15 +130,15 @@ OutputReferenceNested = rf'(?P<location>"<{TemplatePattern}>")(/(?P<location_nes
 RevampedReferencePattern = fr'"(?P<reference>([.a-zA-Z0-9_/-])+)"{PatternReferenceMethod}'
 LegacyReferencePattern = fr'(?P<reference>([.a-zA-Z0-9_/-])+){PatternReferenceMethod}'
 
-TargetReference = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr"<{StepNamePattern}>")]
-ParameterReference = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=ParameterPattern)]
+TargetReference = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr"^<{StepNamePattern}>$")]
+ParameterReference = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr"^{ParameterPattern}$")]
 MaxRestarts = typing_extensions.Annotated[int, pydantic.Field(gt=-2)]
-BackendType = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr'({ParameterPattern}|docker|local|lsf|kubernetes)')]
-K8sQosType = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr'({ParameterPattern}|guaranteed|burstable|besteffort)')]
-DockerImagePullPolicy = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr'({ParameterPattern}|Always|Never|IfNotPresent)')]
+BackendType = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr'^({ParameterPattern}|docker|local|lsf|kubernetes)$')]
+K8sQosType = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr'^({ParameterPattern}|guaranteed|burstable|besteffort)$')]
+DockerImagePullPolicy = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr'^({ParameterPattern}|Always|Never|IfNotPresent)$')]
 ResourceRequestFloat = typing_extensions.Annotated[int, pydantic.Field(ge=0)]
 ResourceRequestInt = typing_extensions.Annotated[int, pydantic.Field(ge=0)]
-EnvironmentReference = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr'({ParameterPattern}|none|environment)')]
+EnvironmentReference = typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=fr'^({ParameterPattern}|none|environment)$')]
 
 
 class OutputReference:
@@ -284,7 +284,7 @@ class Signature(pydantic.BaseModel):
         description="The name of the template, must be unique in the parent namespace",
         min_length=1,
         # VV: Names cannot end in digits - FlowIR has a special meaning for digits at the end of component names
-        pattern=SignatureNamePattern
+        pattern=f"^{SignatureNamePattern}$"
     )
 
     description: typing.Optional[str] = pydantic.Field(
@@ -310,7 +310,7 @@ class ExecuteStep(pydantic.BaseModel):
 
     target: TargetReference = pydantic.Field(
         description="Reference to a step name. A string enclosed in <> e.g. <foo>", min_length=3,
-        pattern=fr"<{StepNamePattern}>",
+        pattern=fr"^<{StepNamePattern}>$",
     )
 
     args: typing.Dict[str, ParameterValueType] = pydantic.Field(
@@ -338,7 +338,11 @@ class Workflow(pydantic.BaseModel):
         description="The Signature of the Workflow template"
     )
 
-    steps: typing.Dict[str, typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=SignatureNamePattern)]] = pydantic.Field(
+    steps: typing.Dict[
+        str,
+        typing_extensions.Annotated[str, pydantic.StringConstraints(pattern=f"^{SignatureNamePattern}$")
+        ]
+    ] = pydantic.Field(
         description="Instantiated Templates that execute as steps of the parent workflow. "
                     "key: value pairs where the key is the name of the Instance and the value is the name "
                     "of the Template from which to create the Instance."

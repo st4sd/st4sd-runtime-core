@@ -4,6 +4,7 @@
 
 import typing
 
+import pydantic
 import pytest
 import yaml
 
@@ -1463,4 +1464,60 @@ def test_lightweight_validation_missing_exec():
             "loc": ["workflows", 0, "signature", "parameters", 1],
             "msg": 'The parameter some-parameter in location entry-instance does not have a value or default'
         }
+    ]
+
+
+def test_no_replica_names():
+    dsl = {
+        "entrypoint": {
+            "entry-instance": "vv-test",
+            "execute": [{"target": "<entry-instance>"}]
+        },
+        "workflows": [
+            {
+                "signature": {"name": "vv-test"},
+                "steps": {"echo2": "echo2"},
+                "execute": [{"target": "<echo2>"}]
+            }
+        ],
+        "components": [
+            {
+                "signature": {
+                    "name": "echo2",
+                    "parameters": [{"name": "message", "default": "hello world"}]
+                },
+                "command": {"executable": "echo2", "arguments": "%(message)s"}
+            }
+        ]
+    }
+
+
+
+    with pytest.raises(pydantic.ValidationError) as e:
+        _ = experiment.model.frontends.dsl.Namespace(**dsl)
+
+    interesting_keys = ("type", "loc", "msg", "input", "ctx")
+    errors = [
+        {
+            k: v for (k, v) in x.items() if k in interesting_keys
+        } for x in sorted(e.value.errors(), key=lambda x: x["loc"])
+    ]
+
+    assert errors == [
+        {
+            'type': 'string_pattern_mismatch',
+            'loc': ('components', 0, 'signature', 'name'),
+            'msg': "String should match pattern "
+                   "'^(stage(?P<stage>([0-9]+))\\.)?(?P<name>([A-Za-z0-9._-]*[A-Za-z_-]+))$'",
+            'input': 'echo2',
+            'ctx': {'pattern': '^(stage(?P<stage>([0-9]+))\\.)?(?P<name>([A-Za-z0-9._-]*[A-Za-z_-]+))$'},
+        },
+        {
+            'type': 'string_pattern_mismatch',
+            'loc': ('workflows', 0, 'steps', 'echo2'),
+            'msg': "String should match pattern "
+                   "'^(stage(?P<stage>([0-9]+))\\.)?(?P<name>([A-Za-z0-9._-]*[A-Za-z_-]+))$'",
+            'input': 'echo2',
+            'ctx': {'pattern': '^(stage(?P<stage>([0-9]+))\\.)?(?P<name>([A-Za-z0-9._-]*[A-Za-z_-]+))$'},
+        },
     ]

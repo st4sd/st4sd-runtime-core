@@ -16,6 +16,7 @@ import os
 import pprint
 import re
 import traceback
+import typing
 from string import Template
 from threading import RLock
 from typing import (Any, Callable, Dict, List, MutableMapping, Optional, Set,
@@ -4930,8 +4931,13 @@ class FlowIRConcrete(object):
                   )
             self._component_dictionary[comp_id] = component
 
-    def replicate(self, platform=None, ignore_errors=False, top_level_folders=None):
-        # type: (str, bool, List[str]) -> DictFlowIR
+    def replicate(
+        self,
+        platform: typing.Optional[str]=None,
+        ignore_errors: bool=False,
+        top_level_folders: typing.Optional[typing.List[str]]=None
+    ) -> DictFlowIR:
+
         """Replicates a primitive FlowIRConcrete
 
         Arguments:

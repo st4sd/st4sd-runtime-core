@@ -1080,8 +1080,10 @@ def test_validate_dsl_with_unknown_params():
     assert len(exc.underlying_errors) == 1
     print(exc.underlying_errors[0].pretty_error())
     assert exc.underlying_errors[0].location == ["components", 0, "command", "arguments"]
-    assert str(exc.underlying_errors[0].underlying_error) == ('Reference to unknown parameter "hello". '
-                                                              'Known parameters are {}')
+    assert str(exc.underlying_errors[0].underlying_error) == (
+        'The component was instantiated at workflows/0/execute/0. '
+        'Error: Reference to unknown parameter "hello". Known parameters are {}'
+    )
 
 
 def test_unknown_outputreference():
@@ -1521,3 +1523,133 @@ def test_no_replica_names():
             'ctx': {'pattern': '^(stage(?P<stage>([0-9]+))\\.)?(?P<name>([A-Za-z0-9._-]*[A-Za-z_-]+))$'},
         },
     ]
+
+
+def test_replicate_propagate():
+    dsl = yaml.safe_load("""
+entrypoint:
+  entry-instance: product-of-sums
+  execute:
+    - target: <entry-instance>
+      args:
+        N: 3
+workflows:
+- signature:
+    name: product-of-sums
+    parameters:
+      - name: N
+        default: 1
+  steps:
+    generate-random-pairs: generate-random-pairs
+    nested: nested
+    calculate-product: calculate-product
+  execute:
+    - target: <generate-random-pairs>
+      args:
+        number_pairs: "%(N)s"
+    - target: <nested>
+      args:
+        file: <generate-random-pairs>/pairs.yaml:output
+    - target: <calculate-product>
+      args:
+        numbers: <nested/sum>:output
+
+- signature:
+    name: nested
+    parameters:
+    - name: file
+  steps:
+    sum: sum
+  execute:
+  - target: <sum>
+    args:
+        file: "%(file)s"
+  
+components:
+- signature:
+    name: generate-random-pairs
+    parameters:
+      - name: number_pairs
+  workflowAttributes:
+    replicate: "%(number_pairs)s"
+  command:
+    expandArguments: none
+    executable: python
+    arguments: "%(number_pairs)s"
+- signature:
+    name: sum
+    parameters:
+      - name: file
+  command:
+    expandArguments: none
+    executable: python
+    arguments: "%(file)s %(replica)s"
+- signature:
+    name: calculate-product
+    parameters:
+      - name: numbers
+  workflowAttributes:
+    aggregate: true
+  command:
+    expandArguments: none
+    executable: python
+    arguments: "%(numbers)s"
+    """)
+
+    dsl = experiment.model.frontends.dsl.Namespace(**dsl)
+
+    flowir = experiment.model.frontends.dsl.namespace_to_flowir(dsl)
+
+
+def test_replicate_propagate_through_chain():
+    dsl = yaml.safe_load("""
+entrypoint:
+  entry-instance: dummy
+  execute:
+    - target: <entry-instance>
+workflows:
+- signature:
+    name: dummy
+  steps:
+    first: replicate
+    second: plain
+    third: plain
+    fourth: plain
+  execute:
+    - target: <first>
+    - target: <second>
+      args:
+        message: <first>:output
+    - target: <third>
+      args:
+        message: <second>:output
+    - target: <fourth>
+      args:
+        message: <third>:output
+
+components:
+- signature:
+    name: replicate
+  workflowAttributes:
+    replicate: 1
+  command:
+    expandArguments: none
+    executable: echo
+- signature:
+    name: plain
+    parameters:
+      - name: message
+  command:
+    expandArguments: none
+    executable: echo
+    arguments: "%(message)s %(replica)s"
+    """)
+
+    dsl = experiment.model.frontends.dsl.Namespace(**dsl)
+
+    flowir = experiment.model.frontends.dsl.namespace_to_flowir(dsl)
+
+    raw = flowir.replicate()
+
+    for comp in raw["components"]:
+        assert comp["name"].endswith("0")

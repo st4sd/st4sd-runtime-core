@@ -2,3 +2,5 @@
 numpy < 1.22
 # Matplotlib dropped support for python 3.7 in v3.6.0
 matplotlib < 3.6.0
+# 6.8.0 requires python 3.8 or later
+importlib_metadata < 6.8.0

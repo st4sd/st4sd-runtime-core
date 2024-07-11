@@ -1105,7 +1105,10 @@ def arg_to_bool(name, val):
 
 
 def build_parser() -> NoSystemExitOptparseOptionParser:
-    import importlib_metadata
+    try:
+        import importlib.metadata as importlib_metadata
+    except ImportError:
+        import importlib_metadata
 
     # HACK: Daresbury system dependant
     projectDir = os.path.split(os.path.expanduser("~"))[0]

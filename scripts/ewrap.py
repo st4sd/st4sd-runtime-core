@@ -24,7 +24,11 @@ import experiment.model.errors
 import experiment.runtime.output
 import experiment.model.frontends.flowir
 import experiment.model.storage
-import importlib_metadata
+
+try:
+    import importlib.metadata as importlib_metadata
+except ImportError:
+    import importlib_metadata
 import yaml
 
 usage = "usage: %prog [options] [package]"

@@ -1152,6 +1152,82 @@ def test_unknown_outputreference():
     ]
 
 
+def test_key_output_entry_instance_component():
+    dsl = yaml.safe_load("""
+        entrypoint:
+          entry-instance: with-vars
+          execute:
+          - target: "<entry-instance>"
+          output:
+          - name: foo
+            data-in: <entry-instance>/my-path/file.txt:ref
+        
+        components:
+        - signature:
+            name: with-vars
+          command:
+            executable: generate_file
+            arguments: "%(greeting)s my-path/file.txt"
+          variables:
+            greeting: "hi"
+        """)
+
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl)
+    flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace).raw()
+
+    assert flowir["output"] == {
+        "foo" : {
+            "data-in": "stage0.entry-instance/my-path/file.txt:ref"
+        }
+    }
+
+
+def test_key_output_entry_instance_nested():
+    dsl = yaml.safe_load("""
+            entrypoint:
+              entry-instance: with-replicas
+              execute:
+              - target: "<entry-instance>"
+              output:
+              - name: foo
+                data-in: <entry-instance>/plain/my-path/file.txt:ref
+                description: output of a workflow's step
+                type: super important text file
+            
+            workflows:
+            - signature:
+                name: with-replicas
+              steps:
+                plain: print
+              execute:
+              - target: <plain>
+                args:
+                  message: hello world
+        
+            components:
+            - signature:
+                name: print
+                parameters:
+                - name: message
+              command:
+                executable: echo
+                arguments: "%(message)s"
+              workflowAttributes:
+                aggregate: true
+            """)
+
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl)
+    flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace).raw()
+
+    assert flowir["output"] == {
+        "foo": {
+            "data-in": "stage0.plain/my-path/file.txt:ref",
+            "description": "output of a workflow's step",
+            "type": "super important text file",
+        }
+    }
+
+
 def test_validate_dsl_with_variables():
     dsl = yaml.safe_load("""
         entrypoint:
@@ -1172,7 +1248,6 @@ def test_validate_dsl_with_variables():
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace).raw()
 
     assert flowir['components'][0]['command']['arguments'] == "%(greeting)s"
-
 
 def test_validate_dsl_with_conflicting_variables_and_parameters():
     dsl = yaml.safe_load("""

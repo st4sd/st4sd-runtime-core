@@ -127,6 +127,11 @@ OutputReferenceVanilla = (rf"(?P<location>(<{TemplatePattern}/?>))(/(?P<location
                           rf"{PatternReferenceMethod}?")
 OutputReferenceNested = rf'(?P<location>"<{TemplatePattern}>")(/(?P<location_nested>{TemplatePattern}))?'\
                              rf'{PatternReferenceMethod}?'
+
+RawOutputReferenceVanilla = f"(<{TemplatePattern}/?>)(/({TemplatePattern}))?"
+RawOutputReferenceNested = rf'("<{TemplatePattern}>")(/({TemplatePattern}))?'
+OutputReferenceCombined = f"({RawOutputReferenceVanilla}|{RawOutputReferenceNested}):(ref|output)"
+
 RevampedReferencePattern = fr'"(?P<reference>([.a-zA-Z0-9_/-])+)"{PatternReferenceMethod}'
 LegacyReferencePattern = fr'(?P<reference>([.a-zA-Z0-9_/-])+){PatternReferenceMethod}'
 
@@ -932,6 +937,21 @@ class Component(pydantic.BaseModel):
         description="Variables that the component can use internally, cannot be set by caller of Component"
     )
 
+class KeyOutput(pydantic.BaseModel):
+    class Config:
+        extra = "forbid"
+
+    name: str = pydantic.Field(description="Unique name")
+    dataIn: str = pydantic.Field(
+        alias="data-in", description="OutputReference pointing to the path that a component produces",
+        pattern=OutputReferenceCombined
+    )
+
+    description: typing.Optional[str] = pydantic.Field(default=None, description="Short human readable description")
+    type: typing.Optional[str] = pydantic.Field(
+        default=None, description="Short human readable description of the key output type"
+    )
+
 
 class Entrypoint(pydantic.BaseModel):
     class Config:
@@ -945,11 +965,14 @@ class Entrypoint(pydantic.BaseModel):
 
     execute: typing.List[ExecuteStepEntryInstance] = pydantic.Field(
         [],
-        min_items=1,
-        max_items=1,
+        min_length=1,
+        max_length=1,
         description="How to execute the instance of the entrypoint template in this namespace"
     )
 
+    output: typing.List[KeyOutput] = pydantic.Field(
+        default=[], description="The key outputs of this experiment"
+    )
 
 class Namespace(pydantic.BaseModel):
     class Config:
@@ -1931,6 +1954,10 @@ class ComponentFlowIR:
 
         return {param_name: sorted(set(param_refs)) for param_name, param_refs in refs.items()}
 
+    @property
+    def reference(self) -> str:
+        return f'stage{self.flowir["stage"]}.{self.flowir["name"]}'
+
     def discover_output_references(self) -> typing.Dict[str, typing.List[str]]:
         return self._get_refs_in_param(OutputReferenceVanilla)
 
@@ -2383,7 +2410,39 @@ def namespace_to_flowir(
                 location=scope_location, underlying_error=e
             ))
 
-    all_errors = sum([comp.errors for comp in components.values()], []) + uncaught_errors
+    # VV: At this point we've done everything we could to resolve the DSL 2.0. We should have a mapping of
+    # step identifiers to flowir components. So next we map the DSL 2.0 key-outputs to those of FlowIR
+
+    output_errors = []
+    if namespace.entrypoint.output:
+        complete.get_output()
+
+        for idx, output in enumerate(namespace.entrypoint.output):
+            try:
+                output_ref = OutputReference.from_str(output.dataIn)
+
+                producer, path = output_ref.split(uid_to_name)
+            except ValueError:
+                output_errors.append(
+                    experiment.model.errors.DSLInvalidFieldError(
+                        location=["entrypoint", "outputs", idx],
+                        underlying_error=ValueError(
+                            f"Output {output.name} contains an invalid data-in"
+                        )
+                    )
+                )
+                continue
+
+            comp = components[producer]
+            name = output.name
+            output = output.model_dump(exclude_none=True, exclude={"name", "dataIn"})
+            output["data-in"] = experiment.model.frontends.flowir.FlowIR.compile_reference(
+                comp.reference, filename=path, method=output_ref.method
+            )
+
+            complete.add_output(name, output)
+
+    all_errors = sum([comp.errors for comp in components.values()], []) + uncaught_errors + output_errors
     if all_errors:
         raise experiment.model.errors.DSLInvalidError.from_errors(all_errors)
 
@@ -2671,6 +2730,20 @@ def lightweight_validate(
         return errors
 
     errors_acc = []
+
+    if namespace.entrypoint:
+        registered_key_outputs = set()
+        for idx, output in enumerate(namespace.entrypoint.output):
+            if output.name in registered_key_outputs:
+                errors_acc.append(
+                    experiment.model.errors.DSLInvalidFieldError(
+                        location=["entrypoint", "outputs", idx],
+                        underlying_error=ValueError(
+                            f"Output {output.name} has already been defined"
+                        )
+                    )
+                )
+            registered_key_outputs.add(output.name)
 
     for idx in range(len(namespace.components)):
         # VV: enumerate messes up typehints

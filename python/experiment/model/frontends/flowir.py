@@ -5005,6 +5005,11 @@ class FlowIRConcrete(object):
 
         return venvs
 
+    def add_output(self, name: str, output: typing.Dict[str, typing.Any]):
+        if self._flowir[FlowIR.FieldOutput] is None:
+            self._flowir[FlowIR.FieldOutput] = {}
+        self._flowir[FlowIR.FieldOutput][name] = output
+
     def get_output(self, return_copy=True) -> DictFlowIROutput:
         """Returns a dictionary with the specification of the key-outputs
 

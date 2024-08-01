@@ -952,6 +952,212 @@ class KeyOutput(pydantic.BaseModel):
         default=None, description="Short human readable description of the key output type"
     )
 
+    @pydantic.model_validator(mode="before")
+    def val_rename_entry_instance(cls, value: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
+        if isinstance(value, dict) is False:
+            return value
+
+        if "dataIn" in value and "data-in" not in value:
+            value["data-in"] = value.pop("dataIn")
+
+        return value
+
+
+class InterfaceHookSource(pydantic.BaseModel):
+    class Config:
+        extra = "forbid"
+
+    pathList: typing.Optional[typing.List[str]] = pydantic.Field(
+        default=None, description="List of paths relative to the instance directory. "
+                                  "Mutually exclusive with other fields"
+    )
+
+    path: typing.Optional[str] = pydantic.Field(
+        default=None, description="Path relative to the instance directory. Mutually exclusive with other fields"
+    )
+
+    keyOutput: typing.Optional[str] = pydantic.Field(
+        default=None, description="Name of a key output. Mutually exclusive with other fields"
+    )
+
+    @pydantic.model_validator(mode="after")
+    @classmethod
+    def val_mutually_exclusive_fields(cls, value: "InterfaceHookSource") -> "InterfaceHookSource":
+        if len(value.model_dump(exclude_none=True)) != 1:
+            raise ValueError("Must set exactly 1 field to a non-None value")
+
+        if value.path is not None and len(value.path) == 0:
+            raise ValueError("path cannot be empty")
+
+        for p in (value.pathList or []):
+            if len(p) == 0:
+                raise ValueError("pathList cannot contain empty paths")
+
+        if value.keyOutput is not None and len(value.keyOutput) == 0:
+            raise ValueError("keyOutput cannot be empty")
+
+        return value
+
+
+class HookBase(pydantic.BaseModel):
+    class Config:
+        extra = "forbid"
+
+    source: InterfaceHookSource = pydantic.Field(description="On which file(s) to apply the hook on")
+
+
+class HookBaseWithArgs(HookBase):
+    class Config:
+        extra = "forbid"
+    args: typing.Optional[typing.Dict[str, typing.Any]] = pydantic.Field(
+        default=None, description="Optional hook arguments"
+    )
+
+
+class HookSingleSourcePath(HookBase):
+    @pydantic.model_validator(mode="after")
+    @classmethod
+    def val_exactly_one_path(cls, value: "HookGetInputIDs") -> "HookGetInputIDs":
+        if value.source.path is None and len(value.source.pathList) != 1:
+            raise ValueError("Must either set path or pathList to exactly 1 path")
+
+        return value
+
+    def the_path(self) -> str:
+        if self.source.path is not None:
+            return self.source.path
+        return self.source.pathList[0]
+
+class HookCSVColumnArgs(pydantic.BaseModel):
+    class Config:
+        extra = "forbid"
+
+    column: str = pydantic.Field(description="Name of the column that contains the ids of the input systems")
+
+
+class HookGetInputIDs(HookSingleSourcePath):
+    pass
+
+
+class HookCSVColumn(HookSingleSourcePath):
+    args: HookCSVColumnArgs = pydantic.Field(
+        description="Arguments for the hookCSVColumn hook which extracts the ids of input systems from a column "
+                    "of a CSV file"
+    )
+
+
+class InterfaceInputExtractionMethod(pydantic.BaseModel):
+    class Config:
+        extra = "forbid"
+
+    hookGetInputIds: typing.Optional[HookGetInputIDs] = pydantic.Field(
+        default=None, description="Instructions to call the get_input_ids() method from hooks/interface.py. "
+                                  "Mutually exclusive with other fields"
+    )
+
+    csvColumn: typing.Optional[HookCSVColumn] = pydantic.Field(
+        default=None, description="Instructions to call the get_input_ids() method from hooks/interface.py. "
+                                  "Mutually exclusive with other fields"
+    )
+
+
+class InterfaceInputSpec(pydantic.BaseModel):
+    class Config:
+        extra = "forbid"
+
+    hasAdditionalData: typing.Optional[bool] = pydantic.Field(
+        default=None,
+        description="Whether to associate system ids with input and/or data files"
+    )
+    namingScheme: typing.Optional[str] = pydantic.Field(
+        default=None,
+        description="The name of the scheme that the ids of input systems adhere to"
+    )
+    inputExtractionMethod: typing.Optional[InterfaceInputExtractionMethod] = pydantic.Field(
+        default=None,
+        description="Instructions to extract the ids of input systems"
+    )
+
+
+class HookGetProperties(HookBase):
+    pass
+
+
+class HookCSVDataFrame(HookBaseWithArgs):
+    pass
+
+
+class PropertyExtractionMethod(pydantic.BaseModel):
+    class Config:
+        extra = "forbid"
+
+    hookGetProperties: typing.Optional[HookGetProperties] = pydantic.Field(
+        default=None, description="Instructions to execute the method get_properties() from hooks/interface.py "
+                                  "for extracting the measured property. "
+                                  "Mutually exclusive with other fields"
+    )
+
+    csvDataFrame: typing.Optional[HookCSVDataFrame] = pydantic.Field(
+        default=None, description="Instructions to execute the builtin method csvDataFrame() "
+                                  "for extracting the measured property. "
+                                  "Mutually exclusive with other fields"
+    )
+
+    @pydantic.model_validator(mode="after")
+    @classmethod
+    def val_mutually_exclusive_fields(cls, value: "PropertyExtractionMethod") -> "PropertyExtractionMethod":
+        if len(value.model_dump(exclude_none=True)) != 1:
+            raise ValueError("Must set exactly 1 field to a non-None value")
+        return value
+
+
+class InterfacePropertySpec(pydantic.BaseModel):
+    class Config:
+        extra = "forbid"
+
+    name: str = pydantic.Field(description="The unique name of the measured property")
+    propertyExtractionMethod: PropertyExtractionMethod = pydantic.Field(
+        description="Instructions to extract the measured property"
+    )
+
+
+class Interface(pydantic.BaseModel):
+    class Config:
+        extra = "forbid"
+
+    # VV: TODO Figure out what `id` is and whether we need it or not
+    # id: typing.Optional[str] = pydantic.Field(default=None, description="")
+
+    description: typing.Optional[str] = pydantic.Field(
+        default=None, description="Human readable description of the experiment"
+    )
+    inputSpec: typing.Optional[InterfaceInputSpec] = pydantic.Field(
+        default=None,
+        description="Instructions to extract the ids of the systems that the experiment processes to "
+                    "measure their properties"
+    )
+    propertiesSpec: typing.Optional[typing.List[InterfacePropertySpec]] = pydantic.Field(
+        default=None,
+        description="Instructions the measured properties of the systems that the experiment processes"
+    )
+
+    # VV: runtime generated fields
+    inputs: typing.Optional[typing.List[str]] = pydantic.Field(
+        default=None,
+        description="The runtime system generates this field to record the ids of the input systems"
+    )
+    additionalInputData: typing.Optional[typing.Dict[str, typing.List[str]]] = pydantic.Field(
+        default=None,
+        description="The runtime generates this field to record additional files associated with input system ids"
+    )
+
+    outputFiles: typing.Optional[typing.List[str]] = pydantic.Field(
+        default=None,
+        description="The runtime generates this field to record the files that the runtime generates after it "
+                    "finishes interpreting the interface instructions"
+    )
+
+
 
 class Entrypoint(pydantic.BaseModel):
     class Config:
@@ -973,6 +1179,29 @@ class Entrypoint(pydantic.BaseModel):
     output: typing.List[KeyOutput] = pydantic.Field(
         default=[], description="The key outputs of this experiment"
     )
+
+    interface: typing.Optional[Interface] = pydantic.Field(
+        default=None, description="Instructions to extract measured properties from key outputs of experiment"
+    )
+
+    @pydantic.model_validator(mode="before")
+    def val_rename_entry_instance(cls, value: typing.Dict[str, typing.Any]) ->typing.Dict[str, typing.Any]:
+        if isinstance(value, dict) is False:
+            return value
+
+        if "entryInstance" in value and "entry-instance" not in value:
+            value["entry-instance"] = value.pop("entryInstance")
+
+        # VV: Technically, we could auto-generate the execute field
+        # if "execute" not in value and isinstance(value.get("entry-instance")):
+        #     value["execute"] = [
+        #         {
+        #             "target": "<entry-instance>"
+        #         }
+        #     ]
+
+        return value
+
 
 class Namespace(pydantic.BaseModel):
     class Config:
@@ -2245,6 +2474,61 @@ def auto_generate_entrypoint(
             entry_instance.args[param.name] = param.name.replace(".", "/", 1)
 
 
+def _common_syntax_checks(namespace: Namespace):
+    """Performs checks on the syntax of the DSL
+
+    These are common checks we can perform during both lightweight checking as well as full conversion to FlowIR
+
+    Args:
+        namespace:
+            the namespace to syntax check
+
+    Raises:
+        experiment.model.errors.DSLInvalidError:
+            When there are errors
+    """
+    errors_acc = []
+
+    if namespace.entrypoint:
+        registered_key_outputs = set()
+        for idx, output in enumerate(namespace.entrypoint.output):
+            if output.name in registered_key_outputs:
+                errors_acc.append(
+                    experiment.model.errors.DSLInvalidFieldError(
+                        location=["entrypoint", "outputs", idx],
+                        underlying_error=ValueError(
+                            f"Output {output.name} has already been defined"
+                        )
+                    )
+                )
+            registered_key_outputs.add(output.name)
+
+        if namespace.entrypoint.interface and namespace.entrypoint.interface.propertiesSpec:
+            registered_properties_spec = set()
+
+            for idx, prop in enumerate(namespace.entrypoint.interface.propertiesSpec):
+                if prop.name in registered_properties_spec:
+                    errors_acc.append(
+                        experiment.model.errors.DSLInvalidFieldError(
+                            location=["entrypoint", "interface", "propertiesSpec", idx],
+                            underlying_error=ValueError(
+                                f"propertiesSpec {prop.name} has already been defined"
+                            )
+                        )
+                    )
+                registered_properties_spec.add(prop.name)
+
+    if namespace.entrypoint and namespace.entrypoint.entryInstance and not namespace.entrypoint.execute:
+        errors_acc.append(experiment.model.errors.DSLInvalidFieldError(
+            location=["entrypoint", "execute"],
+            underlying_error=ValueError(
+                f"entry-instance set but execute is empty"
+            )
+        ))
+
+    if errors_acc:
+        raise experiment.model.errors.DSLInvalidError.from_errors(errors_acc)
+
 
 def namespace_to_flowir(
     namespace: Namespace,
@@ -2273,7 +2557,7 @@ def namespace_to_flowir(
         namespace:
             the namespace to convert
         override_entrypoint_args:
-                Overrides the arguments of the entrypoint
+            Overrides the arguments of the entrypoint
 
     Returns:
         A FlowIRConcrete instance
@@ -2303,7 +2587,13 @@ def namespace_to_flowir(
     )
 
     components: typing.Dict[typing.Tuple[str, ...], ComponentFlowIR] = {}
+
     errors = []
+
+    try:
+        _common_syntax_checks(namespace)
+    except experiment.model.errors.DSLInvalidError as e:
+        errors.extend(e.underlying_errors)
 
     for location, scope in scopes.scopes.items():
         if isinstance(scope.template, Component):
@@ -2454,6 +2744,9 @@ def namespace_to_flowir(
         if value is None or isinstance(value, dict):
             continue
         complete.set_platform_global_variable(variable=name, value=value, platform="default")
+
+    if namespace.entrypoint.interface:
+        complete.set_interface(namespace.entrypoint.interface.model_dump(exclude_unset=True))
 
     return complete
 
@@ -2626,7 +2919,7 @@ def lightweight_validate(
         for i in range(len(template.signature.parameters)):
             param = template.signature.parameters[i]
 
-            if not param.default:
+            if not param.default or isinstance(param.default, str) is False:
                 continue
 
             refs = set([match.group()[2:-2] for match in re_var.finditer(param.default)])
@@ -2730,20 +3023,10 @@ def lightweight_validate(
         return errors
 
     errors_acc = []
-
-    if namespace.entrypoint:
-        registered_key_outputs = set()
-        for idx, output in enumerate(namespace.entrypoint.output):
-            if output.name in registered_key_outputs:
-                errors_acc.append(
-                    experiment.model.errors.DSLInvalidFieldError(
-                        location=["entrypoint", "outputs", idx],
-                        underlying_error=ValueError(
-                            f"Output {output.name} has already been defined"
-                        )
-                    )
-                )
-            registered_key_outputs.add(output.name)
+    try:
+        _common_syntax_checks(namespace)
+    except experiment.model.errors.DSLInvalidError as e:
+        errors_acc.extend(e.underlying_errors)
 
     for idx in range(len(namespace.components)):
         # VV: enumerate messes up typehints
@@ -2756,14 +3039,15 @@ def lightweight_validate(
         wf = namespace.workflows[idx]
         errors_acc.extend(no_param_refs_in_parameter_defaults(location=["workflows", idx], template=wf))
 
-    scopes = ScopeStack()
-    try:
-        scopes.discover_all_instances_of_templates(
-            namespace=namespace,
-            override_entrypoint_args=override_entrypoint_args
-        )
-    except experiment.model.errors.DSLInvalidError as e:
-        errors_acc.extend(e.underlying_errors)
+    if namespace.entrypoint and namespace.entrypoint.entryInstance and namespace.entrypoint.execute:
+        scopes = ScopeStack()
+        try:
+            scopes.discover_all_instances_of_templates(
+                namespace=namespace,
+                override_entrypoint_args=override_entrypoint_args
+            )
+        except experiment.model.errors.DSLInvalidError as e:
+            errors_acc.extend(e.underlying_errors)
 
     if errors_acc:
         raise experiment.model.errors.DSLInvalidError.from_errors(errors_acc)

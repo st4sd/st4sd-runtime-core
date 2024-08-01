@@ -55,11 +55,12 @@ def experiment_from_flowir(
         inputs: List[str] | None = None,
         override_data: List[str] | None = None,
         platform: Optional[str] = None,
+        is_flowir: bool = True
 ) -> experiment.model.data.Experiment:
     package_path = os.path.join(location, '%s.package' % str(uuid.uuid4()))
     dir_conf = os.path.join(package_path, 'conf')
     os.makedirs(dir_conf)
-    with open(os.path.join(dir_conf, 'flowir_package.yaml'), 'w') as f:
+    with open(os.path.join(dir_conf, 'flowir_package.yaml' if is_flowir else "dsl.yaml"), 'w') as f:
         f.write(flowir)
 
     extra_files = extra_files or {}
@@ -136,9 +137,13 @@ def new_controller(compExperiment, initial_stage=0, do_restart_sources=None):
 
     return controller, components
 
-def generate_controller_for_flowir(flowir, location, extra_files=None, initial_stage=0, do_restart_sources=None):
-    # type: (str, str, Optional[Dict[str, str]], int, Optional[Dict[int, bool]]) -> experiment.runtime.control.Controller
-    exp = experiment_from_flowir(flowir, location, extra_files)
+
+def generate_controller_for_flowir(
+        flowir: str, location: str, extra_files: Optional[Dict[str, str]] = None, initial_stage: int = 0,
+        do_restart_sources: Optional[Dict[int, bool]] = None,
+        is_flowir: bool = True
+    ) -> experiment.runtime.control.Controller:
+    exp = experiment_from_flowir(flowir, location, extra_files, is_flowir=is_flowir)
 
     controller, all_comps = new_controller(exp, initial_stage, do_restart_sources)
 

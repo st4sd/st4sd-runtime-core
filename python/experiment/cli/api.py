@@ -55,6 +55,7 @@ def get_api(ctx: typer.Context, for_context: str = None):
     # Attempt login to check credentials still work
     import experiment.service.db
     import experiment.service.errors
+
     try:
         api = experiment.service.db.ExperimentRestAPI(
             url, max_retries=2, secs_between_retries=1, cc_auth_token=token

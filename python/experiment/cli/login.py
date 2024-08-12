@@ -173,6 +173,7 @@ def login(
     # Attempt login
     import experiment.service.db
     from experiment.service.errors import UnauthorisedRequest
+
     try:
         experiment.service.db.ExperimentRestAPI(
             url, max_retries=2, secs_between_retries=1, cc_auth_token=access_token

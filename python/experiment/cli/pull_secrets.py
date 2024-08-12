@@ -19,6 +19,7 @@ from experiment.cli.api import get_api
 from experiment.cli.exit_codes import STPExitCodes
 
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from experiment.service.db import ExperimentRestAPI
 

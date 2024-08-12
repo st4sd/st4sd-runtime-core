@@ -485,24 +485,39 @@ def create_package(
     if not config.settings.verbose:
         config.settings.verbose = verbose
 
-    # If we're given a dir, we offer support for
-    # - standalone projects (conf/flowir_package.yaml)
-    # - flowir.conf files
+    is_standalone = False
+
+    # If we're given a dir, we are dealing with a standalone project
+    # standalone projects (conf/flowir_package.yaml)
     if path.is_dir():
+        is_standalone = True
+        # standalone projects must have a conf dir
+        conf_dir = path / Path("conf")
+        if not conf_dir.exists():
+            stderr.print(
+                "[red]Error:[/red]"
+                '\tThe path provided to [blue]--from[/blue] points to a directory without a "conf" subdirectory, '
+                "which is required in the standalone project structure.\n"
+                "[b magenta]HINT[/b magenta]\t"
+                "Refer to https://st4sd.github.io/overview/packaging-workflows/ for more in-depth information"
+            )
+            raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
+
         standalone_flowir_path = path / Path("conf/flowir_package.yaml")
-        flowir_conf_path = path / Path("flowir.conf")
         if standalone_flowir_path.is_file():
             path = standalone_flowir_path
-        elif flowir_conf_path.is_file():
-            path = flowir_conf_path
         else:
             stderr.print(
                 "[red]Error:[/red]"
-                "\tThe path provided to [blue]--from[/blue] does not point to a file or to a standalone project folder"
+                "\tThe path provided to [blue]--from[/blue] points to a directory that does not contain the "
+                '"conf/flowir_package.yaml" file, which is required in the standalone project structure.\n'
+                "[b magenta]HINT[/b magenta]\t"
+                "Refer to https://st4sd.github.io/overview/packaging-workflows/ for more in-depth information"
             )
             raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
 
     from experiment.model.storage import ExperimentPackage
+
     if manifest is None:
         experiment_package: ExperimentPackage = ExperimentPackage.packageFromLocation(
             location=str(path)
@@ -534,18 +549,22 @@ def create_package(
                     "source": {
                         "git": {"location": {"url": origin_url, "commit": commit_id}}
                     },
-                    "config": {
-                        "path": str(path.relative_to(toplevel_git_path)),
-                        "manifestPath": str(
-                            manifest.relative_to(toplevel_git_path)
-                            if manifest is not None
-                            else ""
-                        ),
-                    },
                 }
             ],
         }
     }
+
+    # packages.config
+    config = {}
+    if not is_standalone:
+        config["path"] = str(path.relative_to(toplevel_git_path))
+
+        # Manifests can only be used in standalone projects
+        if manifest is not None:
+            config["manifestPath"] = str(manifest.relative_to(toplevel_git_path))
+
+    if len(config.keys()) != 0:
+        pvep["config"] = config
 
     # Metadata
     pvep["metadata"] = {

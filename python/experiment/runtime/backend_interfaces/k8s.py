@@ -606,7 +606,10 @@ class NativeScheduledTask(experiment.runtime.task.Task):
         #envstring = "OMP_DISPLAY_ENV=TRUE,OMP_PROC_BIND=TRUE,OMP_NUM_THREADS=%d,%s" % (self.numberThreads, envstring)
         env["OMP_DISPLAY_ENV"] = "TRUE"
         env["OMP_NUM_THREADS"] = "%d" % resourceRequest.get('numberThreads',1)
-        env["OMP_PROC_BIND"] = "TRUE"
+
+        if "OMP_PROC_BIND" not in env:
+            # VV: Some users need the ability to override OMP_PROC_BIND
+            env["OMP_PROC_BIND"] = "TRUE"
 
         #TODO the docker CMD docs say
         #The "array form is the preferred format of CMD. Any additional parameters must be individually expressed as

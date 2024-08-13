@@ -17,11 +17,12 @@ stdout = Console()
 
 
 def get_git_toplevel_path(path: Path):
+    if path.is_file():
+        path = path.parent
+
     try:
         toplevel_path = (
-            subprocess.check_output(
-                ["git", "rev-parse", "--show-toplevel"], cwd=path.parent
-            )
+            subprocess.check_output(["git", "rev-parse", "--show-toplevel"], cwd=path)
             .decode()
             .strip()
         )
@@ -36,11 +37,12 @@ def get_git_toplevel_path(path: Path):
 
 
 def get_git_origin_url(path: Path):
+    if path.is_file():
+        path = path.parent
+
     try:
         origin_url = (
-            subprocess.check_output(
-                ["git", "remote", "get-url", "origin"], cwd=path.parent
-            )
+            subprocess.check_output(["git", "remote", "get-url", "origin"], cwd=path)
             .decode()
             .strip()
         )
@@ -75,9 +77,12 @@ def get_alternative_git_url(original_url: str):
 
 
 def get_git_head_commit(path: Path):
+    if path.is_file():
+        path = path.parent
+
     try:
         head_commit = (
-            subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=path.parent)
+            subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=path)
             .decode()
             .strip()
         )

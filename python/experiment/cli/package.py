@@ -446,7 +446,7 @@ def update_definition(
 )
 def create_package(
     ctx: typer.Context,
-    path: Path = typer.Option(
+    input_path: Path = typer.Option(
         Path("."),
         "--from",
         help="Path to the experiment configuration file or a directory that contains a standalone project",
@@ -485,35 +485,32 @@ def create_package(
     if not config.settings.verbose:
         config.settings.verbose = verbose
 
-    # If we're given a dir, we offer support for
-    # - standalone projects (conf/flowir_package.yaml)
-    # - flowir.conf files
-    if path.is_dir():
-        standalone_flowir_path = path / Path("conf/flowir_package.yaml")
-        flowir_conf_path = path / Path("flowir.conf")
-        if standalone_flowir_path.is_file():
-            path = standalone_flowir_path
-        elif flowir_conf_path.is_file():
-            path = flowir_conf_path
-        else:
+    is_standalone = False
+
+    # If we're given a dir, we are dealing with a standalone project
+    # standalone projects (conf/flowir_package.yaml)
+    if input_path.is_dir():
+        is_standalone = True
+        # standalone projects must have a conf dir
+        conf_dir = input_path / Path("conf")
+        if not conf_dir.exists():
             stderr.print(
                 "[red]Error:[/red]"
-                "\tThe path provided to [blue]--from[/blue] does not point to a file or to a standalone project folder"
+                '\tThe path provided to [blue]--from[/blue] points to a directory without a "conf" subdirectory, '
+                "which is required in the standalone project structure.\n"
+                "[b magenta]HINT[/b magenta]\t"
+                "Refer to https://st4sd.github.io/overview/packaging-workflows/ for more in-depth information"
             )
             raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
 
     from experiment.model.storage import ExperimentPackage
-    if manifest is None:
-        experiment_package: ExperimentPackage = ExperimentPackage.packageFromLocation(
-            location=str(path)
-        )
-    else:
-        experiment_package: ExperimentPackage = ExperimentPackage.packageFromLocation(
-            location=str(path)
-        )
+
+    experiment_package: ExperimentPackage = ExperimentPackage.packageFromLocation(
+        location=str(input_path), manifest=str(manifest) if manifest else None
+    )
 
     # Base package
-    origin_url = get_git_origin_url(path)
+    origin_url = get_git_origin_url(input_path)
     # We only support https URLs for cloning
     if origin_url.startswith("git@"):
         origin_url = get_alternative_git_url(origin_url)
@@ -522,8 +519,8 @@ def create_package(
             "ST4SD does not support SSH URLs for cloning packages.\n"
             f"\tThe clone URL for the PVEP has been converted to: {origin_url}"
         )
-    commit_id = get_git_head_commit(path)
-    toplevel_git_path = Path(get_git_toplevel_path(path))
+    commit_id = get_git_head_commit(input_path)
+    toplevel_git_path = Path(get_git_toplevel_path(input_path))
     name = origin_url.split("/")[-1]
 
     pvep = {
@@ -534,18 +531,22 @@ def create_package(
                     "source": {
                         "git": {"location": {"url": origin_url, "commit": commit_id}}
                     },
-                    "config": {
-                        "path": str(path.relative_to(toplevel_git_path)),
-                        "manifestPath": str(
-                            manifest.relative_to(toplevel_git_path)
-                            if manifest is not None
-                            else ""
-                        ),
-                    },
                 }
             ],
         }
     }
+
+    # packages.config
+    config = {}
+    if str(input_path.relative_to(toplevel_git_path)) != ".":
+        config["path"] = str(input_path.relative_to(toplevel_git_path))
+
+    # Manifests can only be used in standalone projects
+    if not is_standalone and manifest is not None:
+        config["manifestPath"] = str(manifest.relative_to(toplevel_git_path))
+
+    if len(config.keys()) != 0:
+        pvep["base"]["packages"][0]["config"] = config
 
     # Metadata
     pvep["metadata"] = {
@@ -575,6 +576,10 @@ def create_package(
         parameterisation["presets"] = {"platform": platforms[0]}
     else:
         parameterisation["executionOptions"] = {"platform": platforms}
+        stderr.print(
+            "[b yellow]WARN[/b yellow]:\tEnsure the order of the platforms is correct, "
+            "as the experiment will use the first one of the list if the user does not provide one."
+        )
 
     # If some variables from the default platform are redefined in other
     # platforms, we want to ignore them

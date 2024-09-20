@@ -82,9 +82,9 @@ def test_load_dsl_with_bad_grammar(output_dir, dsl_conflicting_templates):
     assert isinstance(error.underlyingError, experiment.model.errors.DSLInvalidError)
 
     assert error.underlyingError.errors() == [
-         {'loc': ['workflows', 1], 'msg': 'There already is a Workflow template called main'},
-         {'loc': ['components', 0], 'msg': 'There already is a Workflow template called main'},
-         {'loc': ['components', 2], 'msg': 'There already is a Component template called comp'}
+         {'loc': ['workflows', 1, "signature", "name"], 'msg': 'There already is a Workflow template called main'},
+         {'loc': ['components', 0, "signature", "name"], 'msg': 'There already is a Workflow template called main'},
+         {'loc': ['components', 2, "signature", "name"], 'msg': 'There already is a Component template called comp'}
     ]
 
 

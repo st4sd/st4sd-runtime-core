@@ -1781,7 +1781,7 @@ class ScopeStack:
                     template_type = known_template_names[temp.signature.name]
                     dsl_error.underlying_errors.append(
                         experiment.model.errors.DSLInvalidFieldError(
-                            location=[kind.lower() + "s", idx],
+                            location=[kind.lower() + "s", idx, "signature", "name"],
                             underlying_error=KeyError(f"There already is a {template_type} "
                                                       f"template called {temp.signature.name}")
                         )

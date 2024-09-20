@@ -775,9 +775,9 @@ def test_dsl_conflicting_templates(dsl_conflicting_templates: typing.Dict[str, t
         experiment.model.frontends.dsl.lightweight_validate(namespace)
 
     assert e.value.errors() == [
-        {'loc': ['workflows', 1], 'msg': 'There already is a Workflow template called main'},
-        {'loc': ['components', 0], 'msg': 'There already is a Workflow template called main'},
-        {'loc': ['components', 2], 'msg': 'There already is a Component template called comp'}
+        {'loc': ['workflows', 1, "signature", "name"], 'msg': 'There already is a Workflow template called main'},
+        {'loc': ['components', 0, "signature", "name"], 'msg': 'There already is a Workflow template called main'},
+        {'loc': ['components', 2, "signature", "name"], 'msg': 'There already is a Component template called comp'}
     ]
 
 

@@ -1,7 +1,7 @@
 # Copyright IBM Inc. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-ARG base_image=ubuntu:22.04
+ARG base_image=mirror.gcr.io/ubuntu:22.04
 
 FROM $base_image
 # VV: Builder image

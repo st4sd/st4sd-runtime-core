@@ -6,6 +6,7 @@
 
 import boto3
 import botocore.exceptions
+import botocore.config
 import os
 import logging
 
@@ -28,9 +29,14 @@ class S3Utility:
             self._client = boto_client
         else:
             try:
+                # VV: The behaviour of boto3 changed in v1.36.0 causing AccessDenied exceptions.
+                # See v1.36.0 changes in https://github.com/boto/boto3/blob/develop/CHANGELOG.rst
+                config = botocore.config.Config(
+                    request_checksum_calculation="when_required", response_checksum_validation="when_required"
+                )
                 self._client = boto3.client(
                     's3', aws_access_key_id=access_key_id, aws_secret_access_key=secret_access_key,
-                    endpoint_url=end_point)
+                    endpoint_url=end_point, config=config)
             except Exception as e:
                 raise experiment.runtime.errors.S3Unauthorized(end_point, e)
 

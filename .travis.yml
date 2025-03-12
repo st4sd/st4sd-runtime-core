@@ -19,14 +19,6 @@ before_script:
 
 jobs:
   include:
-  # VV: TODO Remove python 3.7 tests
-  - python: "3.7"
-    env: TOXENV=py37-testA-ibm
-  - python: "3.7"
-    env: TOXENV=py37-testB-ibm
-  - python: "3.7"
-    env: TOXENV=py37-testC-ibm
-
   - python: "3.9.15"
     env: TOXENV=py39-testA-ibm
   - python: "3.9.15"
@@ -40,40 +32,7 @@ jobs:
   - python: "3.10"
     env: TOXENV=py310-testC-ibm
 
-  # VV: TODO Remove python 3.7 image
-  - stage: image
-    os: linux
-    python: "3.7"
-    env:
-      - BUILD_PYTHON_VERSION=37
-    services:
-      - docker
-    script:
-      - git clone git@github.ibm.com:hartreechem/deploy.git deploy_repo
-      - cd deploy_repo
-      - tox -e py${BUILD_PYTHON_VERSION}
-      - source toxenv/bin/activate
-      - cd ..
-      - if [ ! -z "${TRAVIS_TAG}" ]; then
-          export PUSH_IMAGE_TAG="${TRAVIS_TAG}-py${BUILD_PYTHON_VERSION}";
-        else
-          export PUSH_IMAGE_TAG="py${BUILD_PYTHON_VERSION}";
-        fi
-      - if [ "${BUILD_PYTHON_VERSION}" = "37" ]; then
-          export DOCKERFILE_PATH="py37.Dockerfile";
-          export PUSH_PIP_WHEEL_TOO=no;
-          export BASE_LAYER=ubuntu:18.04;
-        else
-          export DOCKERFILE_PATH="Dockerfile";
-          export PUSH_PIP_WHEEL_TOO=yes;
-          export BASE_LAYER=ubuntu:22.04;
-        fi
-      - export IMAGE_URL="${IMAGE_BASE_URL}:${PUSH_IMAGE_TAG}-`arch`"
-      - DEPLOY_ACCESS_TOKEN=$GIT_ACCESS_TOKEN deprepo.py -p artifactory-py${BUILD_PYTHON_VERSION}-intel
-        -o ${GIT_ORG} -r ${GIT_REPO} -d deploy/ st4sd-runtime-core-image.deploy -c --disableContexts 
-        --payload=deploy/creation_payload.json
-        --deploymentMessage="Deployment to artifactory-py${BUILD_PYTHON_VERSION}-intel created by travis" --streamOutput
-      - cat *.log
+
   - stage: image
     os: linux
     python: "3.10"
@@ -107,59 +66,7 @@ jobs:
         --payload=deploy/creation_payload.json
         --deploymentMessage="Deployment to artifactory-py${BUILD_PYTHON_VERSION}-intel created by travis" --streamOutput
       - cat *.log
-# VV: Temporarily disabling ppc64le because of issues installing numpy and ppc64le
-#  - stage: image
-#    os: linux-ppc64le
-#    python: 3.7
-#    services:
-#      - docker
-#    script:
-#      - git clone git@github.ibm.com:hartreechem/deploy.git deploy_repo
-#      - cd deploy_repo
-#      - tox -e py37
-#      - source toxenv/bin/activate
-#      - cd ..
-#      - export GIT_ORG=$(dirname ${TRAVIS_REPO_SLUG})
-#      - export GIT_REPO=$(basename ${TRAVIS_REPO_SLUG})
-#      - export IMG_RUNTIME_CORE=${GIT_REPO}
-#      - DEPLOY_ACCESS_TOKEN=$GIT_ACCESS_TOKEN deprepo.py -p artifactory-py37-power -o ${GIT_ORG} -r ${GIT_REPO}
-#        -d deploy/ st4sd-runtime-core-image.deploy -c --disableContexts --payload=deploy/creation_payload.json
-#        --deploymentMessage="Deployment to artifactory-py37-power created by travis" --streamOutput
-#      - cat *.log
 
-  # VV: TODO Remove python 3.7 image
-  - stage: multiarch
-    os: linux
-    python: "3.7"
-    env:
-      - BUILD_PYTHON_VERSION=37
-    services:
-      - docker
-    script:
-      - git clone git@github.ibm.com:hartreechem/deploy.git deploy_repo
-      - cd deploy_repo
-      - tox -e py${BUILD_PYTHON_VERSION}
-      - source toxenv/bin/activate
-      - cd ..
-      - if [ ! -z "${TRAVIS_TAG}" ]; then
-          export PUSH_IMAGE_TAG="${TRAVIS_TAG}-py${BUILD_PYTHON_VERSION}";
-          export PUSH_MANIFEST_TAG="${TRAVIS_TAG}";
-        else
-          export PUSH_IMAGE_TAG="py${BUILD_PYTHON_VERSION}";
-          export PUSH_MANIFEST_TAG="latest";
-        fi
-      - export IMAGE_URL="${IMAGE_BASE_URL}:${PUSH_IMAGE_TAG}-`arch`"
-      # VV: use the py310 variant as `latest`
-      - if [ "${BUILD_PYTHON_VERSION}" = "310" ]; then
-          export PUSH_LATEST_TOO=yes;
-        else
-          export PUSH_LATEST_TOO=no;
-        fi
-      - DEPLOY_ACCESS_TOKEN=$GIT_ACCESS_TOKEN deprepo.py -p artifactory-py${BUILD_PYTHON_VERSION}-multiarch 
-        -o ${GIT_ORG} -r ${GIT_REPO} -d deploy/ st4sd-runtime-core-multiarch.deploy -c --disableContexts 
-        --payload=deploy/creation_payload.json
-        --deploymentMessage="Deployment to artifactory-py${BUILD_PYTHON_VERSION}-multiarch created by travis"
-      - cat *.log
   - stage: multiarch
     os: linux
     python: "3.10"
@@ -197,7 +104,7 @@ jobs:
     before_install: []
     os: linux
     services: docker
-    python: "3.7"
+    python: "3.10"
     script:
       - git clone git@github.ibm.com:hartreechem/deploy.git deploy_repo
       - cd deploy_repo

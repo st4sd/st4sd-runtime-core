@@ -51,7 +51,7 @@ RUN apt-get update && \
     apt-get upgrade -y && \
     export DEBIAN_FRONTEND=noninteractive && \
     apt-get install -y --no-install-recommends python3.10 python3-pip python3-tk libffi-dev python3-rdkit vim-tiny \
-       locales libzmq3-dev && \
+       locales libzmq3-dev nodejs && \
     locale-gen ${LC_ALL} && \
     rm -rf /var/lib/apt/lists/*
 

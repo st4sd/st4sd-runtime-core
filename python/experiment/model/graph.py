@@ -1500,27 +1500,27 @@ class ComponentSpecification(experiment.model.interface.InternalRepresentationAt
 
             if fuzzy and custom_js:
                 # VV: lazy import Javascript modules only when there's at least 1 component with custom fuzzy hash
-                import js2py
                 # VV: Not using the `as interpreter_js` leads to the `experiment` local variable to be
                 # garbage collected in turn references to `experiment.<anything>` all raise UnboundLocalError
                 # exceptions even if the imports are at the top of the file.
                 import experiment.runtime.interpreters.js as interpreter_js
+                import json
 
                 files_md5 = {k: info_files[k]['md5_hash'] for k in info_files}
                 files = {k: truncate_file(info_files[k]['location']) for k in info_files}
                 upstream = {k: info_producers[k] for k in info_producers}
 
-                # VV: js2py adds an arguments parameter
-                js_function = """function $(_arguments, executable, image, upstream, files, files_md5, fuzzy_info) {
-                    arguments=_arguments;
-                    %s
-                }""" % custom_js
-                js_function = js2py.eval_js(js_function)
-                ret = js_function(
-                    info_commandline['arguments'], info_commandline['executable'], info_backend.get('docker', None),
-                    upstream, files, files_md5, ret)
+                js_function = f"""arguments = {json.dumps(info_commandline['arguments'])};
+executable = {json.dumps(info_commandline['executable'])};
+image = {json.dumps(info_backend.get('docker', None))};
+upstream = {json.dumps(upstream)};
+files = {json.dumps(files)};
+files_md5 = {json.dumps(files_md5)};
+fuzzy_info = {json.dumps(ret)};
 
-                ret = interpreter_js.convert_js_object_to_python(ret)
+{custom_js}"""
+
+                ret = interpreter_js.Javascript.execute_js(js_function)
         except Exception as e:
             log.log(15, traceback.format_exc())
             log.info("Unexpected exception %s - will not generate %s memoization info" % (e, lbl))

@@ -20,9 +20,6 @@ import experiment.runtime.interpreters.js
 import yaml
 from six import string_types
 
-import js2py
-
-convert_cwl_object_to_python = experiment.runtime.interpreters.js.convert_js_object_to_python
 
 """
 Recipes:
@@ -406,41 +403,6 @@ def traverse_expression(expression):
     return None
 
 
-def evaluate_javascript_expression(self, inputs, expression):
-    try:
-        expression = expression.strip()
-        if expression.startswith('$('):
-
-            fake_function = """
-            function $(self, inputs) {
-                return %s;
-            }
-            """ % expression[2:-1]
-        elif expression.startswith('${'):
-            fake_function = """
-            function $(self, inputs) {
-                %s
-            }
-            """ % expression[2:-1]
-        else:
-            raise Exception("Unknown JS sub-expression type: %s" % expression)
-        try:
-            func = js2py.eval_js(fake_function)
-        except:
-            print("could not process \"%s\"" % expression)
-            raise
-
-        cwlobject = func(self, inputs)
-
-        return convert_cwl_object_to_python(cwlobject)
-    except:
-        print("Failed to convert '%s'" % pprint.pformat(self,indent=2))
-        print("inputs: %s" % pprint.pformat(inputs or [], indent=2))
-        print("expression: %s" % expression)
-
-        raise
-
-
 def object_to_string(cwlobject, prefix='', item_separator=' ', separate=True):
     try:
         cwl_type = object_to_type(cwlobject)
@@ -543,7 +505,9 @@ def expression_to_string(self, inputs, expression, invoke_javascript=True):
         print("Evaluating: '%s'" % sub_expr)
         if sub_expr.startswith('$(') or sub_expr.startswith('${'):
             if invoke_javascript:
-                evaluated = evaluate_javascript_expression(self, inputs, sub_expr)
+                evaluated = experiment.runtime.interpreters.js.evaluate_javascript_expression(
+                    sub_expr, self=self, inputs=inputs
+                )
                 try:
                     evaluated = object_to_string(evaluated)
                 except:
@@ -562,8 +526,6 @@ def expression_to_string(self, inputs, expression, invoke_javascript=True):
 
 
 def expand_object(object_description):
-    object_description = convert_cwl_object_to_python(object_description)
-
     try:
         if isinstance(object_description, string_types):
             return object_description
@@ -761,7 +723,9 @@ def apply_blueprint(blueprint, input_objects, input_root_dir):
         if len(legs) > 1:
             value_from_task = lambda: expression_to_string(self, input_objects, value_from)
         else:
-            value_from_task = lambda: evaluate_javascript_expression(self, input_objects, blueprint['valueFrom'])
+            value_from_task = lambda: experiment.runtime.interpreters.js.evaluate_javascript_expression(
+                    blueprint['valueFrom'], self=self, inputs=input_objects
+            )
     else:
         value_from_task = lambda: expression_to_string(self, input_objects, value_from)
 

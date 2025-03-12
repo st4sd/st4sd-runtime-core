@@ -1,4 +1,7 @@
 language: python
+node_js:
+  - "18"
+
 stages:
     - name: test
       if: tag is blank
@@ -51,11 +54,7 @@ jobs:
         else
           export PUSH_IMAGE_TAG="py${BUILD_PYTHON_VERSION}";
         fi
-      - if [ "${BUILD_PYTHON_VERSION}" = "37" ]; then
-          export DOCKERFILE_PATH="py37.Dockerfile";
-          export PUSH_PIP_WHEEL_TOO=no;
-          export BASE_LAYER=ubuntu:18.04;
-        else
+      - if [ "${BUILD_PYTHON_VERSION}" = "310" ]; then
           export DOCKERFILE_PATH="Dockerfile";
           export PUSH_PIP_WHEEL_TOO=yes;
           export BASE_LAYER=ubuntu:22.04;

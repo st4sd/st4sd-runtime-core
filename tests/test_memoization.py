@@ -8,8 +8,11 @@ if TYPE_CHECKING:
 import os
 from . import utils
 import hashlib
+import pytest
 
+run_test_js = pytest.mark.skipif("not config.getoption('test_js')")
 
+@run_test_js
 def test_custom_memoization_hash(output_dir):
     dummy_file = os.path.join(output_dir, 'fake')
 

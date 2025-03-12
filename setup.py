@@ -79,9 +79,6 @@ setup(
     install_requires=['reactivex>=4.0.0', 'pyyaml', 'pytest', 'pytest-xdist', 'pytest-timeout',
                       'networkx', 'matplotlib', 'requests', 'six', 'kubernetes', 'psutil', 'boto3>=1.36.0',
                       'pyrsistent',
-                      # VV: Contains a fix for CVE-2024-28397 that Marven11 implemented
-                      # my fork is just bumping the version of js2py
-                      'js2py@git+https://github.com/VassilisVassiliadis/Js2Py.git@761a5119595a46658e0407ce3b3fecf8593b8eff',
                       'pymongo>=4.0', 'papermill', 'pandas', 'future', 'pydantic>=2.0.0',
                       'pydantic-settings',
                       'keyring', 'typer>=0.12.3', 'jsonschema'], #, 'pygraphviz'],

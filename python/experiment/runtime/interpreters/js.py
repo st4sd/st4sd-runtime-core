@@ -11,9 +11,10 @@ import argparse
 import json
 import os
 
-import yaml
+import subprocess
+import typing
 
-import js2py
+import yaml
 
 
 """
@@ -34,52 +35,70 @@ Outputs are stored in the --output file
 """
 
 
-def convert_js_object_to_python(jsobject):
-    # VV: TODO make this recursion safe
+class Javascript:
+    NodeJSAvailable = None
 
-    def dict_update(key, which):
-        def f(value, key=key, which=which):
-            which[key] = value
-        return f
+    @classmethod
+    def execute_js(cls, code: str) -> typing.Any:
+        if cls.NodeJSAvailable is False:
+            raise ValueError("node js is unavailable")
+        marker = "ST4SD_OUTPUT_START_MARKER"
 
-    def list_update(index, which):
-        def f(value, index=index, which=which):
-            which[index] = value
-        return f
+        wrapped_method = f"""
+function st4sd_wrapper() {{
+{code}
+}}
 
-    visited = set()
-    ret = [None]
-    remaining = [(jsobject, list_update(0, ret))]
+output = st4sd_wrapper();
 
-    while remaining:
-        jsobject, set_func = remaining.pop()
-        obj_id = id(jsobject)
-        if obj_id in visited:
-            set_func(jsobject)
-            continue
-        visited.add(obj_id)
+process.stdout.write("{marker}\\n");
+process.stdout.write(JSON.stringify(output));"""
 
-        if isinstance(jsobject, js2py.base.JsObjectWrapper):
-            if jsobject.__dict__['_obj'].Class == 'Object':
-                jsobject = jsobject.to_dict()
-                set_func(jsobject)
-                for key in jsobject:
-                    remaining.append((jsobject[key], dict_update(key, jsobject)))
-                continue
-            elif jsobject.__dict__['_obj'].Class in [
-                'Array', 'Int8Array', 'Uint8Array', 'Uint8ClampedArray',
-                'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array',
-                'Float32Array', 'Float64Array'
-            ]:
-                jsobject = jsobject.to_list()
-                set_func(jsobject)
-                for idx, value in enumerate(jsobject):
-                    remaining.append((value, list_update(idx, jsobject)))
-                continue
+        proc = subprocess.Popen(["node", "-e", wrapped_method], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        exit_code = proc.wait()
 
-        set_func(jsobject)
+        try:
+            stdout = proc.stdout.read()
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode('utf-8')
+        except Exception as e:
+            stdout = f"unable to get stdout of node - underlying reason {e}"
 
-    return ret[0]
+        try:
+            stderr = proc.stderr.read()
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode('utf-8')
+        except Exception as e:
+            stderr = f"unable to get stdout of node - underlying reason {e}"
+
+        if exit_code != 0:
+            raise ValueError(f"node exited with exit code {exit_code}. "
+                             f"Its stdout was:\n{stdout}\n\nIts stderr was:\n{stderr}")
+
+        start = stdout.rfind(marker)
+        if start == -1:
+            raise ValueError(f"Unable to find the {marker} marker in the stdout of node. "
+                             f"Its stdout was:\n{stdout}\n\nIts stderr was:\n{stderr}")
+
+        raw = stdout[start+len(marker):].lstrip("\n")
+        return json.loads(raw)
+
+
+    @classmethod
+    def detect_node_js(cls):
+        try:
+            proc = subprocess.Popen(["node", "--version"],stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            exit_code = proc.wait()
+        except FileNotFoundError:
+            # VV: There's no node executable on this machine
+            return False
+
+        return exit_code==0
+
+
+if Javascript.NodeJSAvailable is None:
+    Javascript.NodeJSAvailable = Javascript.detect_node_js()
+
 
 def pretty_json(entry):
     return json.dumps(entry, sort_keys=True, indent=4, separators=(',', ': '))
@@ -192,28 +211,25 @@ def parse_arguments(args=None):
     return blueprint, input_objects, parsed.output
 
 
-def evaluate_javascript_expression(inputs, expression):
+def evaluate_javascript_expression(expression, **kwargs):
+    lines = [
+        f"{key} = {json.dumps(value)}" for key, value in kwargs.items()
+    ]
+
     expression = expression.strip()
     if expression.startswith('$('):
-
-        fake_function = """
-        function $(inputs) {
-            return %s;
-        }
-        """ % expression[2:-1]
+        lines.append(f"return {expression[2:-1]};")
     elif expression.startswith('${'):
-        fake_function = """
-        function $(inputs) {
-            %s
-        }
-        """ % expression[2:-1]
+        lines.append(expression[2:-1])
     else:
         raise Exception("Unknown JS sub-expression type: %s" % expression)
+
+    code = ";\n".join(lines)
+
     try:
-        func = js2py.eval_js(fake_function)
-        ret = func(inputs)
-    except:
-        print("could not process \"%s\"" % expression)
+        ret = Javascript.execute_js(code)
+    except Exception as e:
+        print(f"could not process \"{expression}\" due to {e}")
         raise
 
     return ret
@@ -227,7 +243,7 @@ def main():
         if os.path.exists(p):
             os.remove(p)
 
-    output_object = evaluate_javascript_expression(input_objects, blueprint)
+    output_object = evaluate_javascript_expression(blueprint, input=input_objects)
     print(output_object)
 
     tmp_file = 'definitely_not_js_output.yml'

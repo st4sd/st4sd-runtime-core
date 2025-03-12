@@ -23,6 +23,11 @@ from .reactive_testutils import *
 
 from typing import Dict, Any
 
+
+def pytest_addoption(parser):
+    parser.addoption('--test_js', action='store_true', dest="test_js",
+                     default=False, help="Enable tests that involve evaluating JavaScript")
+
 # VV: Next 2 lines remove artificial delays in Engine between component becoming ready
 # and launching its first task
 experiment.runtime.engine.ENGINE_RUN_START_DELAY_SECONDS = 0.0

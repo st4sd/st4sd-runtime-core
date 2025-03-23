@@ -186,7 +186,7 @@ class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
 
 
     def get_referenced_image_ids(self):
-        image = self.executor.image
+        image: str = self.executor.image
 
         if "@sha256:" in image:
             return {image: image}
@@ -198,7 +198,15 @@ class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
 
             if exit_code == 0:
                 docker_inspect = json.load(resolve.stdout)
-                return {image:  docker_inspect[0]["RepoDigests"][0]}
+                image_entry = docker_inspect[0]
+                try:
+                    full_image = image_entry["RepoDigests"][0]
+                except IndexError:
+                    # VV: If the RepoDigests array is empty then this could be an image that
+                    # the user built locally, its digest is the same as its ID
+                    image_name = image.rsplit(":", 1)[0]
+                    full_image = "@".join((image_name, image_entry["Id"]))
+                return {image:  full_image}
         except Exception as e:
             self.log.info(f"Could not resolve image {image} because of {e} - ignoring exception")
 

@@ -4976,7 +4976,7 @@ class FlowIRConcrete(object):
         try:
             platform_deps = app_deps[platform]
         except KeyError:
-            # VV: This platform does not define an `application-depedencies`
+            # VV: This platform does not define an `application-dependencies`
             if platform != FlowIR.LabelDefault:
                 # VV: If it's not the `default` platform then just fetch the app-deps of the default platform
                 platform_deps = app_deps.get(FlowIR.LabelDefault, [])

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
-
+import pathlib
 
 try:
     import subprocess32 as subprocess
@@ -1169,11 +1169,17 @@ class DockerRun(Executor):
         if 'docker-args' in options:
             dockerRunArgs = options['docker-args']
 
+        # VV: On some operating systems (e.g. MacOS) and Container Runtimes (e.g. Rancher Desktop)
+        # the host_path argument of -v $host_path:$container_path must be fully resolved if it
+        # points to a symlink.
+
+        resolved_path = pathlib.Path(target.environment['INSTANCE_DIR']).resolve().as_posix()
+
         executor = cls(
             target=target,
             executable=options.get('docker-executable', 'docker'),
             image=options['docker-image'],
-            mounts=[(target.environment['INSTANCE_DIR'], target.environment['INSTANCE_DIR'])],
+            mounts=[(resolved_path, target.environment['INSTANCE_DIR'])],
             environment=target.environment,
             resolveShellSubstitutions=False,
             use_entrypoint=options.get('docker-use-entrypoint', False),

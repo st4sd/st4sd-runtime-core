@@ -1228,6 +1228,65 @@ def test_key_output_entry_instance_nested():
     }
 
 
+def test_validate_dsl_with_broken_outputreference():
+    dsl = yaml.safe_load("""
+            entrypoint:
+              entry-instance: with-replicas
+              execute:
+              - target: "<entry-instance>"
+            workflows:
+            - signature:
+                name: with-replicas
+              steps:
+                replicate: replica-print
+                plain: print
+              execute:
+              - target: <replicate>
+                args:
+                  replicas: 2
+                  message: "I am replicating"
+              - target: <plain>
+                args:
+                  # VV: ":output" cannot be enclosed in <> here
+                  message: <replicate:output>
+            components:
+            - signature:
+                name: replica-print
+                parameters:
+                - name: replicas
+                  default: 0
+                - name: message
+              command:
+                executable: echo
+                arguments: "%(message)s from %(replica)s"
+              workflowAttributes:
+                replicate: "%(replicas)s"
+            - signature:
+                name: print
+                parameters:
+                - name: message
+              command:
+                executable: echo
+                arguments: "%(message)s"
+              workflowAttributes:
+                aggregate: true
+            """)
+
+    namespace = experiment.model.frontends.dsl.Namespace(**dsl)
+    with pytest.raises(experiment.model.errors.DSLInvalidError) as e:
+        experiment.model.frontends.dsl.namespace_to_flowir(namespace).raw()
+
+    exc = e.value
+    assert isinstance(exc, experiment.model.errors.DSLInvalidError)
+    assert exc.errors() == [
+        {
+            'loc': ['workflows', 0, 'execute', 1, 'signature', 'parameters', 0],
+            'msg': 'OutputReference <replicate:output> includes the reference method inside the <> characters '
+                   'which are reserved for the output name'
+        }
+    ]
+
+
 def test_validate_dsl_with_variables():
     dsl = yaml.safe_load("""
         entrypoint:

@@ -114,6 +114,8 @@ import experiment.model.errors
 ParameterPattern = experiment.model.frontends.flowir.FlowIR.VariablePattern
 ParameterValueType = typing.Optional[typing.Union[str, float, int, typing.Dict[str, typing.Any]]]
 
+# VV: Workflows can end with numbers
+WorkflowSignatureNamePattern = r"(stage(?P<stage>([0-9]+))\.)?(?P<name>([A-Za-z0-9._-]+))"
 SignatureNamePattern = r"(stage(?P<stage>([0-9]+))\.)?(?P<name>([A-Za-z0-9._-]*[A-Za-z_-]+))"
 StepNamePattern = r"[.A-Za-z0-9_-]+"
 # VV: A reference may have a prefix of N step names and a suffix of M paths each separated with a "/"
@@ -127,6 +129,13 @@ OutputReferenceVanilla = (rf"(?P<location>(<{TemplatePattern}/?>))(/(?P<location
                           rf"{PatternReferenceMethod}?")
 OutputReferenceNested = rf'(?P<location>"<{TemplatePattern}>")(/(?P<location_nested>{TemplatePattern}))?'\
                              rf'{PatternReferenceMethod}?'
+
+# VV: This <step_name:ref> is wrong it must be <step_name>:ref
+BadOutputReferenceVanilla = (rf"(?P<location>(<{TemplatePattern}/?{PatternReferenceMethod}>))"
+                             rf"(/(?P<location_nested>{TemplatePattern}))?")
+BadOutputReferenceNested = (rf'(?P<location>"<{TemplatePattern}>{PatternReferenceMethod}")'
+                            rf'(/(?P<location_nested>{TemplatePattern}))?')
+
 
 RawOutputReferenceVanilla = f"(<{TemplatePattern}/?>)(/({TemplatePattern}))?"
 RawOutputReferenceNested = rf'("<{TemplatePattern}>")(/({TemplatePattern}))?'
@@ -308,6 +317,13 @@ class Signature(pydantic.BaseModel):
 
         raise KeyError(f"{self.name} does not contain parameter {name}")
 
+class WorkflowSignature(Signature):
+    name: str = pydantic.Field(
+        description="The name of the template, must be unique in the parent namespace",
+        min_length=1,
+        # VV: Workflow names, contrary to component ones, can end with digits
+        pattern=f"^{WorkflowSignatureNamePattern}$"
+    )
 
 class ExecuteStep(pydantic.BaseModel):
     class Config:
@@ -339,7 +355,7 @@ class Workflow(pydantic.BaseModel):
     class Config:
         extra = "forbid"
 
-    signature: Signature = pydantic.Field(
+    signature: WorkflowSignature = pydantic.Field(
         description="The Signature of the Workflow template"
     )
 
@@ -1467,6 +1483,9 @@ class ScopeStack:
             pattern_vanilla = re.compile(OutputReferenceVanilla)
             pattern_nested = re.compile(OutputReferenceNested)
 
+            bad_pattern_vanilla = re.compile(BadOutputReferenceVanilla)
+            bad_pattern_nested = re.compile(BadOutputReferenceNested)
+
             if ensure_references_point_to_sibling_steps:
                 # VV: First ensure that references to outputs all begin with a sibling name
                 for pattern in [pattern_vanilla, pattern_nested]:
@@ -1480,6 +1499,15 @@ class ScopeStack:
                                     f"OutputReference {match.group(0)} does not reference any of the known siblings "
                                     f"{sibling_steps}")
                             )
+
+            for pattern in [bad_pattern_vanilla, bad_pattern_nested]:
+                for match in pattern.finditer(value):
+                    raise experiment.model.errors.DSLInvalidFieldError(
+                        location=self.dsl_location() + (field or []),
+                        underlying_error=ValueError(
+                            f"OutputReference {match.group(0)} includes the reference method inside the "
+                            f"<> characters which are reserved for the output name")
+                    )
 
             for pattern in [pattern_vanilla, pattern_nested]:
                 partial = ""
@@ -2126,7 +2154,13 @@ class ScopeStack:
                 errors.extend(resolve_scope(scope=scope, scope_stack=scope_stack))
 
         if errors:
-            raise experiment.model.errors.DSLInvalidError.from_errors(errors)
+            unique = set()
+            deduplicated = []
+            for e in errors:
+                if str(e) not in unique:
+                    deduplicated.append(e)
+                unique.add(str(e))
+            raise experiment.model.errors.DSLInvalidError.from_errors(deduplicated)
 
         return scope_stack
 

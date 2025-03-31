@@ -114,7 +114,17 @@ class DockerTask(experiment.runtime.backend_interfaces.localtask.LocalTask):
         do_pull = not if_not_present
 
         if if_not_present:
-            do_pull = self.executor.image not in self.get_referenced_image_ids()
+            references = self.get_referenced_image_ids()
+            do_pull = self.executor.image not in references
+            if not do_pull:
+                # VV: The image exists locally.
+                # Rewrite the executor.image so that it uses the image digest.
+                # This stops Docker from trying to look it up on a remote docker registry
+                resolved_image: str = references[self.executor.image]
+                digest = resolved_image.rsplit("@sha256:",1)[1]
+                self.log.log(15, f"Rewriting image from {self.executor} to {digest} due to IfNotPresent "
+                                 f"ImagePullPolicy for an image that is available locally")
+                self.executor.image = digest
 
         if not do_pull:
             return

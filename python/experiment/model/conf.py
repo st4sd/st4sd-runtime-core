@@ -14,6 +14,8 @@ import copy
 import difflib
 import logging
 import os
+import typing
+
 import pydantic.typing
 import re
 import traceback
@@ -1811,11 +1813,72 @@ class ExperimentConfigurationFactory(object):
         Returns:
             Type[FlowIRExperimentConfiguration] which is a Class that can parse the format at @path
         """
+        def is_component_strictly_dsl(obj: typing.Dict[str, typing.Any]) -> bool:
+            if not isinstance(obj, dict):
+                return False
+            if isinstance(obj["signature"], dict):
+                return True
+
+            return False
+
+        def is_component_strictly_flowir(obj: typing.Dict[str, typing.Any]) -> bool:
+            if not isinstance(obj, dict):
+                return False
+            if isinstance(obj["signature"], dict):
+                return True
+
+            return False
+
+        def is_experiment_strictly_dsl(obj: typing.Dict[str, typing.Any]) -> bool:
+            if not isinstance(obj, dict):
+                return False
+            if "workflows" in obj or "entrypoint" in obj:
+                return True
+            for c in obj.get("components", []):
+                if is_component_strictly_dsl(c):
+                    return True
+
+            return False
+
+        def is_experiment_strictly_flowir(obj: typing.Dict[str, typing.Any]) -> bool:
+            if not isinstance(obj, dict):
+                return False
+
+            for key in (
+                    experiment.model.frontends.flowir.FlowIR.FieldVariables,
+                    experiment.model.frontends.flowir.FlowIR.FieldEnvironments,
+                    experiment.model.frontends.flowir.FlowIR.FieldStatusReport,
+                    experiment.model.frontends.flowir.FlowIR.FieldApplicationDependencies,
+                    experiment.model.frontends.flowir.FlowIR.FieldOutput,
+                    experiment.model.frontends.flowir.FlowIR.FieldBlueprint,
+                    experiment.model.frontends.flowir.FlowIR.FieldPlatforms,
+                    experiment.model.frontends.flowir.FlowIR.FieldVirtualEnvironments,
+                    experiment.model.frontends.flowir.FlowIR.FieldVersion,
+                    experiment.model.frontends.flowir.FlowIR.FieldInterface
+                ):
+                if key in obj:
+                    return True
+
+            for c in obj.get("components", []):
+                if is_component_strictly_flowir(c):
+                    return True
+
+            return False
+
+
         if os.path.isfile(path):
             with open(path, 'r') as f:
                 try:
                     dictionary = yaml.safe_load(f)
-                    if isinstance(dictionary, dict) and "entrypoint" in dictionary and "components" in dictionary:
+                    if is_experiment_strictly_dsl(dictionary):
+                        return cls.format_map["dsl"]
+                    elif is_experiment_strictly_flowir(dictionary):
+                        return cls.format_map['flowir']
+                    else:
+                        # VV: We are switching over to DSL 2.0 so if the YAML file is so badly structured
+                        # that we cannot tell whether it's DSL 2.0 or FlowIR then let's assume that it's DSL 2.0
+                        # The developer is likely learning DSL 2.0 and made a mistake. Let them see the syntax
+                        # errors we produce for DSL 2.0 - this will help them identify how to fix their definition
                         return cls.format_map["dsl"]
                 except Exception:
                     pass

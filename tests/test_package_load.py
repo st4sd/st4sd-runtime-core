@@ -485,7 +485,7 @@ def test_experiment_from_package_with_invalid_yaml(output_dir):
     filename = f"wf-{uuid.uuid4()}.yml"
     dummy_file = os.path.join(output_dir, filename)
 
-    flowir = """
+    exp_def = """
     # intentional typo
     componentsA:
     - name: hello
@@ -495,18 +495,18 @@ def test_experiment_from_package_with_invalid_yaml(output_dir):
     """
 
     with open(dummy_file, 'w') as f:
-        f.write(flowir)
+        f.write(exp_def)
 
     with pytest.raises(experiment.model.errors.ExperimentInvalidConfigurationError) as e:
-        expPackage = experiment.model.storage.ExperimentPackage.packageFromLocation(dummy_file)
+        _ = experiment.model.storage.ExperimentPackage.packageFromLocation(dummy_file)
 
-    exc: experiment.model.errors.FlowIRConfigurationErrors = e.value.underlyingError
+    exc: experiment.model.errors.DSLInvalidError = e.value.underlyingError
+    assert len(exc.errors()) == 1
 
-    assert len(exc.underlyingErrors) == 1
-
-    unknown_key: experiment.model.errors.FlowIRKeyUnknown = exc.underlyingErrors[0]
-
-    assert unknown_key.key_name == 'FlowIR.componentsA'
+    assert exc.errors()[0] == {
+        'loc': ['componentsA'],
+        'msg': 'Extra inputs are not permitted'
+    }
 
 
 def test_load_package_with_malformed_yaml_and_fail(output_dir):

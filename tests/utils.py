@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import typing
 
 import experiment.model.data
 import experiment.model.storage
@@ -141,9 +142,11 @@ def new_controller(compExperiment, initial_stage=0, do_restart_sources=None):
 def generate_controller_for_flowir(
         flowir: str, location: str, extra_files: Optional[Dict[str, str]] = None, initial_stage: int = 0,
         do_restart_sources: Optional[Dict[int, bool]] = None,
-        is_flowir: bool = True
+        is_flowir: bool = True, inputs: typing.Optional[typing.List[str]] = None,
+        variable_files: typing.Optional[typing.List[str]] = None,
     ) -> experiment.runtime.control.Controller:
-    exp = experiment_from_flowir(flowir, location, extra_files, is_flowir=is_flowir)
+    exp = experiment_from_flowir(flowir, location, extra_files, is_flowir=is_flowir, inputs=inputs,
+                                 variable_files=variable_files)
 
     controller, all_comps = new_controller(exp, initial_stage, do_restart_sources)
 

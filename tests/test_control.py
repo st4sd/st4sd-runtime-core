@@ -189,6 +189,41 @@ def Restart(workingDirectory, restarts, componentName, log, exitReason, exitCode
     assert comp.engine.restarts == 2
 
 
+def test_dsl2_with_input_and_variable_files(output_dir):
+    dsl = """
+entrypoint:
+  entry-instance: "hello"
+  execute:
+    - target: <entry-instance>
+      args:
+        message: hello world
+        input.file.in: input.file.in
+
+components:
+  - signature:
+      name: hello
+      parameters:
+        - name: message
+        - name: input.file.in
+    command:
+      executable: bash
+      arguments: |
+        -c "echo %(message)s %(input.file.in)s:ref"
+      expandArguments: none    
+"""
+    variables = """
+    global:
+        message: custom value
+    """
+
+
+    controller = generate_controller_for_flowir(dsl, output_dir, is_flowir=False, extra_files={
+        "../variables.yaml": variables,
+        f"../file.in": "just my input file"
+    }, inputs=[f"{output_dir}/file.in"], variable_files=[f"{output_dir}/variables.yaml"])
+    controller.run()
+
+
 def test_sanitycheck_failure_restart_failure(output_dir):
     flowir = """
     components:

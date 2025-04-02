@@ -1837,6 +1837,19 @@ class ScopeStack:
         if dsl_error.underlying_errors:
             raise dsl_error
 
+        # VV: Ensure that special arguments to the entrypoint template have special values.
+        # Special arguments are those which point to files, currently we support
+        # input and data files
+        all_args: typing.Dict[str, ParameterValueType] = {
+            param.name : param.default for param in initial_template.signature.parameters
+            if "default" in param.model_fields_set
+        }
+        all_args.update(namespace.entrypoint.execute[0].args.copy())
+        all_args.update(override_entrypoint_args or {})
+        for param in initial_template.signature.parameters:
+            if param.name.startswith("input.") or param.name.startswith("data."):
+                all_args[param.name] = param.name.replace(".", "/", 1)
+
         if isinstance(initial_template, Workflow):
             for (idx, wf) in enumerate(namespace.workflows):
                 if wf.signature.name == initial_template.signature.name:
@@ -1868,7 +1881,7 @@ class ScopeStack:
                     location=["entry-instance"],
                     dsl_location=dsl_location,
                     template=initial_template,
-                    parameters=override_entrypoint_args or namespace.entrypoint.execute[0].args,
+                    parameters=all_args,
                     template_location=self._get_template_location(namespace=namespace, template=initial_template),
                 )
             )
@@ -2467,47 +2480,6 @@ def number_to_roman_like_numeral(value: int) -> str:
     return rep
 
 
-def auto_generate_entrypoint(
-    namespace: Namespace
-):
-    """Auto-generates the entrypoint of a dsl2 namespace
-
-    The method assumes that the namespace is valid, it auto-inserts values for special parameters:
-    - input.<a file name>
-    - data.<a file name>
-
-    These are special parameters of the entry-instance Template which should not have a value and their value
-    should be:
-
-    - input/<a file name>
-    - data/<a file name>
-
-    Args:
-        namespace:
-            the DSL 2.0 definition of a namespace, it's updated in place
-    """
-    if not namespace.entrypoint:
-        return
-
-    if not len(namespace.entrypoint.execute or []) == 1:
-        return
-
-    entry_instance = namespace.entrypoint.execute[0]
-
-    if entry_instance.args is None:
-        entry_instance.args = {}
-
-    try:
-        template = namespace.get_template(namespace.entrypoint.entryInstance)
-    except Exception as e:
-        return
-
-    for param in template.signature.parameters:
-        if param.name.startswith("input.") or param.name.startswith("data."):
-            # VV: turn input.my-inputs.csv into input/my-inputs.csv
-            entry_instance.args[param.name] = param.name.replace(".", "/", 1)
-
-
 def _common_syntax_checks(namespace: Namespace):
     """Performs checks on the syntax of the DSL
 
@@ -2608,12 +2580,7 @@ def namespace_to_flowir(
                 )
             ]
         )
-
-    # VV: Make a copy in the namespace and work on that, because in `auto_generate_entrypoint()` we'll patch the
-    # entrypoint so that special parameters of the entry-instance Template (like input.<name> and data.<name>)
-    # receive a value
     namespace: Namespace = namespace.model_copy(deep=True)
-    auto_generate_entrypoint(namespace)
 
     scopes =  ScopeStack.from_namespace(
         namespace=namespace,

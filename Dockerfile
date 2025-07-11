@@ -47,11 +47,17 @@ ENV LC_ALL en_GB.UTF-8
 ENV LANG en_GB.UTF-8
 
 # VV: Install system-wide pip and python-tk for matplotlib for consistency with moved virtual-env
+# AP: The default repositories on Ubuntu 22.04 provide NodeJS v12, which is ancient
+#     We use nodesource to get the v22 LTS
 RUN apt-get update && \
     apt-get upgrade -y && \
     export DEBIAN_FRONTEND=noninteractive && \
     apt-get install -y --no-install-recommends python3.10 python3-pip python3-tk libffi-dev python3-rdkit vim-tiny \
-       locales libzmq3-dev nodejs && \
+       locales libzmq3-dev curl && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x -o nodesource_setup.sh && \
+    bash nodesource_setup.sh && rm nodesource_setup.sh && \
+    apt-get install -y nodejs && \
+    apt-get remove curl -y && apt-get autoremove -y && \
     locale-gen ${LC_ALL} && \
     rm -rf /var/lib/apt/lists/*
 

@@ -8,17 +8,15 @@ FROM $base_image
 RUN apt-get update && \
     export DEBIAN_FRONTEND=noninteractive && \
     apt-get install -y \
-       python3.12 python3-pip python3-tk git python3-rdkit locales curl libffi-dev libssl-dev \
-       libpng-dev libjpeg-dev libfreetype6-dev pkg-config libxml2-dev libxslt-dev libpython3.12-dev \
-       libzmq3-dev
+    python3.12 python3-pip python3-tk git python3-rdkit locales curl libffi-dev libssl-dev \
+    libpng-dev libjpeg-dev libfreetype6-dev pkg-config libxml2-dev libxslt-dev libpython3.12-dev \
+    libzmq3-dev tox
 ENV LANGUAGE=en
 ENV LC_ALL en_GB.UTF-8
 ENV LANG en_GB.UTF-8
 
 RUN locale-gen ${LC_ALL}
 
-RUN python3 -m pip install --upgrade pip virtualenv setuptools six tox && \
-    python3 -m pip install papermill 
 RUN mkdir /venvs
 
 ENV PIP_DEFAULT_TIMEOUT=120
@@ -29,7 +27,7 @@ ENV VIRTUAL_ENV=/venvs/st4sd-runtime-core
 
 RUN cd /st4sd-runtime-core && \
     export DEPLOY_VENV=${VIRTUAL_ENV} && \
-    export TOX_ENV=py310-deploy && \
+    export TOX_ENV=py312-deploy && \
     tox -e $TOX_ENV -vv && \
     chmod a+rwx ${VIRTUAL_ENV}/* && \
     chmod a+rwx ${VIRTUAL_ENV}/*/*/*
@@ -51,7 +49,7 @@ RUN apt-get update && \
     apt-get upgrade -y && \
     export DEBIAN_FRONTEND=noninteractive && \
     apt-get install -y --no-install-recommends python3.12 python3-pip python3-tk libffi-dev python3-rdkit vim-tiny \
-       locales libzmq3-dev curl && \
+    locales libzmq3-dev curl && \
     apt-get remove curl -y && apt-get autoremove -y && \
     locale-gen ${LC_ALL} && \
     rm -rf /var/lib/apt/lists/*

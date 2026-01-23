@@ -59,6 +59,8 @@ setup(
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
     ],
 
     # What does your project relate to?
@@ -76,7 +78,7 @@ setup(
     # Notes:
     # rx version dep. Rx moved to 3.x after 1.6.1 which introduced new API
 
-    install_requires=['reactivex>=4.0.0', 'pyyaml', 'pytest', 'pytest-xdist', 'pytest-timeout',
+    install_requires=['setuptools', 'reactivex>=4.0.0', 'pyyaml', 'pytest', 'pytest-xdist', 'pytest-timeout',
                       'networkx', 'matplotlib', 'requests', 'six', 'kubernetes', 'psutil', 'boto3>=1.36.0',
                       'pyrsistent',
                       'pymongo>=4.0', 'papermill', 'pandas', 'future', 'pydantic>=2.0.0',

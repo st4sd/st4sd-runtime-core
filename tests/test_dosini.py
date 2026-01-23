@@ -222,7 +222,7 @@ def test_stage0_process_inputs(saltcurve_flowir):
         "arguments": "-n %(numberPoints)s input/field.conf:ref > concentration_curve_points.csv",
         "environment": "%(pythonenv)s",
         "executable": "concentration_curve_points.py",
-        "resolvePath": True,
+        "resolvePath": False,
         'expandArguments': 'none',
         'interpreter': None,
     }
@@ -297,7 +297,7 @@ def test_stage2_cafsimulation_raw(saltcurve_flowir):
         'executable': '%(dpdexe)s',
         'expandArguments': 'double-quote',
         'interpreter': None,
-        'resolvePath': True
+        'resolvePath': False
     }
 
     assert caf_sim['executors'] == {
@@ -450,7 +450,7 @@ def test_stage2_cafsimulation(saltcurve_flowir):
          'executable': '/gpfs/cds/local/HCRI003/rla09/shared/bin/dpd_xl_spectrum_omp.exe',
          'expandArguments': 'double-quote',
          'interpreter': None,
-         'resolvePath': True
+         'resolvePath': False
     }
 
     assert caf_sim['executors'] == {
@@ -607,7 +607,7 @@ def test_stage2_vizstream_raw(saltcurve_flowir):
                 "environment": "viz",
                 "executable": "bin/viz_streamer.py",
                 'expandArguments': 'double-quote',
-                'resolvePath': True,
+                'resolvePath': False,
                 'interpreter': None,
             }
 
@@ -704,7 +704,7 @@ def test_stage2_vizstream_resolved(saltcurve_flowir):
                              "-c VIZRender:ref -p $FLOW_RUN_ID -u \"\"",
                 "environment": "viz",
                 "executable": "bin/viz_streamer.py",
-                'resolvePath': True,
+                'resolvePath': False,
                 'expandArguments': 'double-quote',
                 'interpreter': None,
             }
@@ -874,7 +874,7 @@ def test_dump_instance(saltcurve_flowir, output_dir):
         'command': {'arguments': '-n %(numberPoints)s input/field.conf:ref > concentration_curve_points.csv',
                     'environment': '%(pythonenv)s',
                     'executable': 'concentration_curve_points.py',
-                    'resolvePath': True,
+                    'resolvePath': False,
                     'expandArguments': 'none',
                     'interpreter': None,
                     },
@@ -1058,7 +1058,7 @@ def test_override_input_files(saltcurve_flowir_override_input, output_dir):
                          "-c VIZRender:ref -p $FLOW_RUN_ID -u \"\"",
             "environment": "viz",
             "executable": "bin/viz_streamer.py",
-            'resolvePath': True,
+            'resolvePath': False,
             'expandArguments': 'double-quote',
             'interpreter': None,
         }

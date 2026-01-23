@@ -780,7 +780,7 @@ class CCommand(pydantic.BaseModel):
     )
 
     resolvePath: typing.Optional[typing.Union[bool, ParameterReference]] = pydantic.Field(
-        True,
+        False,
         description="When True, instructs the runtime to follow links when resolving the executable path"
     )
 

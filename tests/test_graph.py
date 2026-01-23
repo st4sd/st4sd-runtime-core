@@ -234,7 +234,7 @@ def test_graph_generate_new_dsl_component():
             'name': 'wisdom'
         },
         'command': {'executable': 'sh', 'arguments': '-c "hello %(name)s; ls -lth %(param0)s %(param1)s"',
-                    'resolvePath': True, 'expandArguments': 'none', 'interpreter': None, 'environment': '%(env-vars)s'},
+                    'resolvePath': False, 'expandArguments': 'none', 'interpreter': None, 'environment': '%(env-vars)s'},
         'resourceRequest': {'numberProcesses': 1, 'numberThreads': 1, 'ranksPerNode': 1, 'threadsPerCore': 1,
                             'memory': None, 'gpus': None},
         'workflowAttributes': {'restartHookFile': None, 'aggregate': False, 'replicate': None,

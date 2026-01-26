@@ -661,7 +661,7 @@ def test_instantiate_flowir(salt_curve_conf):
         'environment': 'pythonlsf',
         'executable': 'concentration_curve_points.py',
         'arguments': '-n 3 input/field.conf:ref > concentration_curve_points.csv',
-        'resolvePath': True,
+        'resolvePath': False,
         'expandArguments': 'none',
         'interpreter': None,
     }

@@ -2280,7 +2280,7 @@ class FlowIR(object):
             'command': {
                 'executable': None,
                 'arguments': '',
-                'resolvePath': True,
+                'resolvePath': False,
                 'expandArguments': 'double-quote',
                 'interpreter': None,
             }

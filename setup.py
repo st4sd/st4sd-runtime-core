@@ -59,6 +59,8 @@ setup(
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
     ],
 
     # What does your project relate to?
@@ -81,7 +83,7 @@ setup(
                       'pyrsistent',
                       'pymongo>=4.0', 'papermill', 'pandas', 'future', 'pydantic>=2.0.0',
                       'pydantic-settings',
-                      'keyring', 'typer>=0.12.3', 'jsonschema'], #, 'pygraphviz'],
+                      'keyring', 'typer>=0.12.3', 'jsonschema', 'setuptools; python_version>="3.12"'], #, 'pygraphviz'],
 
     # List additional groups of dependencies here (e.g. development
     # dependencies). You can install these using the following syntax,

@@ -178,6 +178,10 @@ class LocalExecutableChecker(experiment.model.interface.ExecutableChecker):
             # It could raise AttributeError due to missing path separator
             # It could resolve it w.r.t CWD! (seen on Mac)
             # Because of these possibilities the safest is to LBYL if executable is pathless
+            # VV: Note, on a Mac with a uv managed venv the python binary in the venv is a link to a python
+            # system binary. Running the resolved path is not the same as running the link.
+            # When directly invoking the system binary, the python interpreter does not see the packages installed
+            # in the virtual environment.
             if resolvePath and os.path.split(executableWithPath)[0] != "":
                 #Note realpath does not check if what the link resolves to exists
                 #If the executable doesn't exists realpath just returns it with no error

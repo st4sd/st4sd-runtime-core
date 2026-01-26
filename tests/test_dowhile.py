@@ -313,7 +313,7 @@ def test_graph_instantiate_next_iter(dw_exp_simple):
                 'executable': 'echo',
                 'expandArguments': 'double-quote',
                 'interpreter': None,
-                'resolvePath': True
+                'resolvePath': False
             }
         },
         'stage1.0#noDependencies0': {
@@ -323,7 +323,7 @@ def test_graph_instantiate_next_iter(dw_exp_simple):
                 'executable': 'echo',
                 'expandArguments': 'double-quote',
                 'interpreter': None,
-                'resolvePath': True
+                'resolvePath': False
             },
         },
         'stage1.1#noDependencies0': {
@@ -333,7 +333,7 @@ def test_graph_instantiate_next_iter(dw_exp_simple):
                 'executable': 'echo',
                 'expandArguments': 'double-quote',
                 'interpreter': None,
-                'resolvePath': True
+                'resolvePath': False
             },
         },
         'stage1.0#add0': {
@@ -343,7 +343,7 @@ def test_graph_instantiate_next_iter(dw_exp_simple):
                 'executable': 'echo',
                 'expandArguments': 'double-quote',
                 'interpreter': None,
-                'resolvePath': True
+                'resolvePath': False
             }
         },
         'stage1.1#add0': {
@@ -353,7 +353,7 @@ def test_graph_instantiate_next_iter(dw_exp_simple):
                 'executable': 'echo',
                 'expandArguments': 'double-quote',
                 'interpreter': None,
-                'resolvePath': True
+                'resolvePath': False
             }
         },
         'stage1.0#fake_add': {
@@ -363,7 +363,7 @@ def test_graph_instantiate_next_iter(dw_exp_simple):
                 'executable': 'echo',
                 'expandArguments': 'double-quote',
                 'interpreter': None,
-                'resolvePath': True
+                'resolvePath': False
             }
         },
         'stage1.1#fake_add': {
@@ -373,7 +373,7 @@ def test_graph_instantiate_next_iter(dw_exp_simple):
                 'executable': 'echo',
                 'expandArguments': 'double-quote',
                 'interpreter': None,
-                'resolvePath': True
+                'resolvePath': False
             }
         },
         'stage1.0#stop': {
@@ -393,7 +393,7 @@ def test_graph_instantiate_next_iter(dw_exp_simple):
                 'executable': 'echo',
                 'expandArguments': 'none',
                 'interpreter': None,
-                'resolvePath': True
+                'resolvePath': False
             }
         },
         'stage1.1#stop': {
@@ -413,7 +413,7 @@ def test_graph_instantiate_next_iter(dw_exp_simple):
                 'executable': 'echo',
                 'expandArguments': 'none',
                 'interpreter': None,
-                'resolvePath': True
+                'resolvePath': False
             }
         },
         'stage2.report0': {
@@ -423,7 +423,7 @@ def test_graph_instantiate_next_iter(dw_exp_simple):
                 'executable': 'echo',
                 'expandArguments': 'double-quote',
                 'interpreter': None,
-                'resolvePath': True
+                'resolvePath': False
             }
         }
     }

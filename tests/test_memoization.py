@@ -71,7 +71,7 @@ def test_custom_memoization_hash(output_dir):
     dict_hello = n_d_hello['componentSpecification']  # type: "ComponentSpecification"
     echo = n_echo['componentSpecification']  # type: "ComponentSpecification"
 
-    md5 = hashlib.md5()
+    md5 = hashlib.md5(usedforsecurity=False)
     md5.update("hello".encode('utf-8'))
     md5_hash = md5.hexdigest()
 

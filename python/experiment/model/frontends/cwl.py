@@ -341,7 +341,7 @@ def apply_hint_and_validate(
 
 def hash_uri(uri):
     # type: (str) -> str
-    md5 = hashlib.md5()
+    md5 = hashlib.md5(usedforsecurity=False)
     if isinstance(uri, str):
         uri = uri.encode()
     md5.update(uri)

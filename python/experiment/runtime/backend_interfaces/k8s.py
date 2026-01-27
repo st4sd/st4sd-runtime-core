@@ -1879,6 +1879,13 @@ class NativeScheduledTask(experiment.runtime.task.Task):
 
                 self.log.log(18, 'Checking condition %s (type is %s)' % (job_cond, job_cond.type))
 
+                if job_cond.type == "SuccessCriteriaMet":
+                    # VV: In k8s v1.33 there's a new condition type called SuccessCriteriaMet which for the purposes
+                    # of this backend acts the same as Complete.
+                    # In certain cases a Job can transition to both the SuccessCriteriaMet and the Complete
+                    # Conditions at the exact same time. Here, we just convert any SuccessCriteriaMet into Complete.
+                    job_cond.type = "Complete"
+
                 # VV: Condition.type is either Complete or Failed
                 if job_cond.type in ['Complete', 'Failed']:
                     # VV: Only Complete jobs include a completion time,

@@ -1118,7 +1118,7 @@ class ComponentSpecification(experiment.model.interface.InternalRepresentationAt
             else:
                 raise ValueError("Cannot generate hash of %s: %s" % (type(obj), obj))
 
-        md5 = hashlib.md5()
+        md5 = hashlib.md5(usedforsecurity=False)
         md5.update(buf.encode('utf-8'))
 
         return md5.hexdigest()
@@ -1311,7 +1311,7 @@ class ComponentSpecification(experiment.model.interface.InternalRepresentationAt
 
         def md5_of_file(path):
             # VV: see: https://stackoverflow.com/a/3431838
-            md5 = hashlib.md5()
+            md5 = hashlib.md5(usedforsecurity=False)
             with open(path, 'rb') as f:
                 for chunk in iter(lambda: f.read(4096), b''):
                     md5.update(chunk)

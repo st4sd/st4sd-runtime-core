@@ -32,11 +32,6 @@ RUN cd /st4sd-runtime-core && \
     chmod a+rwx ${VIRTUAL_ENV}/* && \
     chmod a+rwx ${VIRTUAL_ENV}/*/*/*
 
-RUN PATH=${VIRTUAL_ENV}/bin:${PATH} pip3 install twine
-RUN cd /st4sd-runtime-core && \
-    export PATH=${VIRTUAL_ENV}/bin:${PATH} && \
-    python3 setup.py sdist bdist_wheel
-
 # VV: Runtime image
 FROM $base_image
 
@@ -69,7 +64,6 @@ Ireland\n' >/gpl-licenses
 
 ENV VIRTUAL_ENV=/venvs/st4sd-runtime-core
 COPY --from=0 /venvs/ /venvs/
-COPY --from=0 /st4sd-runtime-core/dist /st4sd-runtime-core/dist
 
 
 # VV: Activate the virtual environment

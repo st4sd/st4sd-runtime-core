@@ -132,5 +132,8 @@ setup(
         "scripts/ewrap.py",
         "scripts/einputs.py",
         "scripts/stp",
+        "scripts/st4sd-k8s-monitor.py",
+        "scripts/st4sd-s3-fetch-files.sh",
+        "scripts/st4sd-s3-download.py",
     ]
 )

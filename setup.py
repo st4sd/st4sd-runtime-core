@@ -17,7 +17,7 @@ with open(path.join(here, 'README.MD'), encoding='utf-8') as f:
     long_description = f.read()
 
 setup(
-    name='st4sd-runtime-core',
+    name='st4sd_runtime_core',
 
     use_scm_version={"root": ".", "relative_to": __file__, "local_scheme": "no-local-version"},
     setup_requires=['setuptools_scm'],

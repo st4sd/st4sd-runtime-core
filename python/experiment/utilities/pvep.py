@@ -4,7 +4,6 @@
 # Author: Vassilis Vassiliadis
 
 import os
-import re
 from string import Template
 from typing import Dict, Optional, Set, Tuple
 
@@ -68,20 +67,18 @@ def update_pvep_with_environment_values(
     if environment is None:
         environment = dict(os.environ)
 
-    # VV: Find all environment variable references using regex
-    # Matches both $VAR and ${VAR} syntax, but excludes escaped $$VAR and $${VAR}
-    # Pattern explanation:
-    # - (?<!\$) negative lookbehind to ensure we don't match $$VAR or $${VAR}
-    # - \$\{([^}]+)\} matches ${VAR_NAME}
-    # - \$([A-Za-z_][A-Za-z0-9_]*) matches $VAR_NAME
-    pattern = r"(?<!\$)\$\{([^}]+)\}|(?<!\$)\$([A-Za-z_][A-Za-z0-9_]*)"
-    matches = re.finditer(pattern, pvep_string)
+    # VV: Use Template's own pattern to find variable references
+    # This ensures we match exactly what Template.substitute() will process
+    template = Template(pvep_string)
 
+    # Find all matches using Template's pattern
     referenced_vars: Set[str] = set()
-    for match in matches:
-        # match.group(1) is for ${VAR}, match.group(2) is for $VAR
-        var_name = match.group(1) if match.group(1) else match.group(2)
-        referenced_vars.add(var_name)
+    for match in template.pattern.finditer(pvep_string):
+        # Template pattern has groups: 'escaped', 'named', 'braced', 'invalid'
+        # We only care about 'named' (for $VAR) and 'braced' (for ${VAR})
+        var_name = match.group("named") or match.group("braced")
+        if var_name:
+            referenced_vars.add(var_name)
 
     missing_vars = sorted([var for var in referenced_vars if var not in environment])
 
@@ -90,5 +87,4 @@ def update_pvep_with_environment_values(
 
     # VV: All variables are present, perform substitution using string.Template
     # Template.substitute() automatically handles $$NAME and $${NAME} as escape sequences
-    template = Template(pvep_string)
     return template.substitute(environment), sorted(referenced_vars)

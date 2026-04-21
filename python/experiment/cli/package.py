@@ -29,6 +29,10 @@ from experiment.cli.git import (
     get_alternative_git_url,
 )
 from experiment.cli.pull_secrets import check_stack_has_pull_secrets_for_pvep_images
+from experiment.utilities.pvep import (
+    update_pvep_with_environment_values,
+    UndefinedEnvironmentVariablesError,
+)
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -163,6 +167,7 @@ def output_format_callback(chosen_format: str):
     options_metavar="[--tag <name>] "
     "[--update-package-definition] "
     "[--use-latest-commit] "
+    "[--expand-env-vars / --no-expand-env-vars] "
     "[-v | --verbose]",
     no_args_is_help=True,
 )
@@ -198,6 +203,13 @@ def push(
         "those performed by --use-latest-commit, will result in the package file being updated.",
         is_flag=True,
     ),
+    expand_env_vars: bool = typer.Option(
+        True,
+        "--expand-env-vars/--no-expand-env-vars",
+        help="Expand environment variables in the PVEP using $VAR or ${VAR} syntax. "
+        "Escape names using $$VAR or $${VAR} to avoid substitution. "
+        "Enabled by default. Use --no-expand-env-vars to disable.",
+    ),
     verbose: bool = typer.Option(
         False, "-v", "--verbose", help="Use verbose output.", is_flag=True
     ),
@@ -210,7 +222,32 @@ def push(
         config.settings.verbose = verbose
 
     api = get_api(ctx)
+
     pvep = load_package_from_file(path)
+
+    # VV: This enables people to use env-var references in their PVEPs instead of plaintext sensitive information
+    # like for example S3 or Git credentials. Enabled by default.
+    if expand_env_vars:
+        pvep_string = json.dumps(pvep)
+
+        try:
+            updated_pvep_string, env_vars_found = update_pvep_with_environment_values(
+                pvep_string
+            )
+
+            if env_vars_found:
+                pvep = json.loads(updated_pvep_string)
+
+                vars_list = ", ".join(env_vars_found)
+                stdout.print(
+                    f"[blue]Info:[/blue]\tSubstituted {len(env_vars_found)} environment variable{'s' if len(env_vars_found) > 1 else ''}: {vars_list}"
+                )
+        except UndefinedEnvironmentVariablesError as e:
+            stderr.print(f"[red]Error:[/red]\t{e}")
+            stderr.print(
+                "[italic]Tip:\tEnsure all referenced environment variables are set before running this command.[/italic]"
+            )
+            raise typer.Exit(code=STPExitCodes.INPUT_ERROR)
 
     if use_latest_commit:
         origin_url = get_git_origin_url(path)

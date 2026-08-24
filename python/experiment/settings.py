@@ -23,7 +23,7 @@ class Orchestrator(pydantic.BaseModel):
     Use the load_settings_orchestrator() method to parse and validate settings (method raises errors that
     include information about offending environment variables)
     """
-    model_config = ConfigDict(extra=pydantic.Extra.forbid)
+    model_config = ConfigDict(extra="forbid")
 
     workers_default_all: Optional[Annotated[int, Field(ge=1)]] = pydantic.Field(
         None, description="If set, sets the default value to all worker polls. This will override the default of "
@@ -42,7 +42,8 @@ class Orchestrator(pydantic.BaseModel):
     workers_backend_k8s: Optional[Annotated[int, Field(ge=1)]] = pydantic.Field(
         50, description="Number of workers in the Backend.Kubernetes threadPool")
 
-    @pydantic.root_validator(pre=True)
+    @pydantic.model_validator(mode="before")
+    @classmethod
     def set_defaults(cls, value: Dict[str, str]) -> Dict[str, str]:
         """If workers_default_all is set (and it's a valid value) then copy it to all fields that are not set
 
@@ -66,7 +67,7 @@ class Orchestrator(pydantic.BaseModel):
             if workers_all < 1:
                 return value
 
-            for k in cls.__fields__:
+            for k in cls.model_fields:
                 if k == label or k in value:
                     continue
                 value[k] = value[label]

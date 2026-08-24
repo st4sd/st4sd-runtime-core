@@ -284,7 +284,7 @@ class InstantiatedParameter(Parameter):
         Returns:
             The value of the parameter, if unset defaults to @default
         """
-        if 'value' in self.__fields_set__:
+        if 'value' in self.model_fields_set:
             return self.value
         return self.default
 
@@ -1222,7 +1222,7 @@ class ScopeStack:
         ):
             self.location = location
             self.parameters = parameters or {}
-            self.template: typing.Union[Workflow, Component] = template.copy(deep=True)
+            self.template: typing.Union[Workflow, Component] = template.model_copy(deep=True)
             self._dsl_location = list(dsl_location)
             self._template_location = list(template_location)
 
@@ -1269,7 +1269,7 @@ class ScopeStack:
             """
             known_params = {
                 p.name: p.default for p in self.template.signature.parameters
-                if "default" in p.__fields_set__
+                if "default" in p.model_fields_set
             }
 
             for name, value in known_params.items():

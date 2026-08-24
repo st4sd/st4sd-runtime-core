@@ -127,7 +127,7 @@ def load_settings_orchestrator(
 
         from_environ = {}
         env_vars = {}
-        for setting_name in Orchestrator.__fields__:
+        for setting_name in Orchestrator.model_fields:
             env_var_name = "".join([env_prefix, setting_name.upper()])
             if env_var_name in environ:
                 env_vars[setting_name] = environ[env_var_name]

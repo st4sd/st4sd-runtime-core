@@ -24,10 +24,10 @@ def test_parse_options_from_environment_variables():
         assert custom.workers_engine_task == 5
         assert custom.workers_backend_k8s == 6
 
-        assert orig.dict() != custom.dict()
+        assert orig.model_dump() != custom.model_dump()
     finally:
         restored = experiment.settings.load_settings_orchestrator(reuse_if_existing=False)
-        assert orig.dict() == restored.dict()
+        assert orig.model_dump() == restored.model_dump()
 
 
 def test_override_defaults():
@@ -45,7 +45,7 @@ def test_override_defaults():
         assert custom.workers_engine_task == 424242
         assert custom.workers_backend_k8s == 424242
 
-        assert orig.dict() != custom.dict()
+        assert orig.model_dump() != custom.model_dump()
     finally:
         restored = experiment.settings.load_settings_orchestrator(reuse_if_existing=False)
-        assert orig.dict() == restored.dict()
+        assert orig.model_dump() == restored.model_dump()

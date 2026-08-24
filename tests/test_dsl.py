@@ -813,7 +813,7 @@ def test_output_reference_split():
 def test_parse_dsl_step_via_param(dsl_step_via_param: typing.Dict[str, typing.Any]):
     namespace = experiment.model.frontends.dsl.Namespace(**dsl_step_via_param)
 
-    print(yaml.safe_dump(namespace.dict(by_alias=True, exclude_none=True), indent=2, sort_keys=False))
+    print(yaml.safe_dump(namespace.model_dump(by_alias=True, exclude_none=True), indent=2, sort_keys=False))
 
     print("-----------")
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
@@ -831,7 +831,7 @@ def test_parse_dsl_step_via_param(dsl_step_via_param: typing.Dict[str, typing.An
 def test_parse_dsl_step_via_param_more_complex(dsl_step_via_param_more_complex: typing.Dict[str, typing.Any]):
     namespace = experiment.model.frontends.dsl.Namespace(**dsl_step_via_param_more_complex)
 
-    print(yaml.safe_dump(namespace.dict(by_alias=True, exclude_none=True), indent=2, sort_keys=False))
+    print(yaml.safe_dump(namespace.model_dump(by_alias=True, exclude_none=True), indent=2, sort_keys=False))
 
     print("-----------")
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
@@ -849,7 +849,7 @@ def test_parse_dsl_step_via_param_more_complex(dsl_step_via_param_more_complex: 
 def test_parse_dsl_no_workflow(dsl_no_workflow: typing.Dict[str, typing.Any]):
     namespace = experiment.model.frontends.dsl.Namespace(**dsl_no_workflow)
 
-    print(yaml.safe_dump(namespace.dict(by_alias=True, exclude_unset=True, exclude_defaults=True, exclude_none=True),
+    print(yaml.safe_dump(namespace.model_dump(by_alias=True, exclude_unset=True, exclude_defaults=True, exclude_none=True),
         indent=2))
 
     print("-----------")
@@ -867,7 +867,7 @@ def test_parse_hallucinated_simple_dsl2(simple_flowir: experiment.model.frontend
 
     namespace = experiment.model.frontends.dsl.Namespace(**dsl)
 
-    print(yaml.safe_dump(namespace.dict(by_alias=True, exclude_unset=True, exclude_defaults=True, exclude_none=True),
+    print(yaml.safe_dump(namespace.model_dump(by_alias=True, exclude_unset=True, exclude_defaults=True, exclude_none=True),
         indent=2))
 
     print("-----------")
@@ -896,7 +896,7 @@ def test_parse_hallucinated_simple_dsl2(simple_flowir: experiment.model.frontend
 def test_parse_band_gap_pm3_gamess_us(dsl_band_gap_pm3_gamess_us: typing.Dict[str, typing.Any]):
     namespace = experiment.model.frontends.dsl.Namespace(**dsl_band_gap_pm3_gamess_us)
 
-    print(yaml.safe_dump(namespace.dict(by_alias=True, exclude_unset=True, exclude_defaults=True, exclude_none=True),
+    print(yaml.safe_dump(namespace.model_dump(by_alias=True, exclude_unset=True, exclude_defaults=True, exclude_none=True),
         indent=2))
     print("-----------")
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
@@ -949,7 +949,7 @@ def test_dsl2_single_workflow_single_component_single_step_no_datareferences(fix
     dsl = request.getfixturevalue(argname=fixture_name)
     namespace = experiment.model.frontends.dsl.Namespace(**dsl)
 
-    print(yaml.safe_dump(namespace.dict(exclude_unset=True, exclude_none=True, exclude_defaults=True, by_alias=True),
+    print(yaml.safe_dump(namespace.model_dump(exclude_unset=True, exclude_none=True, exclude_defaults=True, by_alias=True),
         sort_keys=False))
 
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
@@ -973,7 +973,7 @@ def test_dsl2_single_workflow_one_component_two_steps_no_edges(
         dsl_one_workflow_one_component_two_steps_no_edges: typing.Dict[str, typing.Any]):
     namespace = experiment.model.frontends.dsl.Namespace(**dsl_one_workflow_one_component_two_steps_no_edges)
 
-    print(yaml.safe_dump(namespace.dict(exclude_unset=True, exclude_none=True, exclude_defaults=True, by_alias=True),
+    print(yaml.safe_dump(namespace.model_dump(exclude_unset=True, exclude_none=True, exclude_defaults=True, by_alias=True),
         sort_keys=False))
 
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
@@ -1002,7 +1002,7 @@ def test_dsl2_single_workflow_one_component_two_steps_with_edges(
         dsl_one_workflow_one_component_two_steps_with_edges: typing.Dict[str, typing.Any]):
     namespace = experiment.model.frontends.dsl.Namespace(**dsl_one_workflow_one_component_two_steps_with_edges)
 
-    print(yaml.safe_dump(namespace.dict(exclude_unset=True, exclude_none=True, exclude_defaults=True, by_alias=True),
+    print(yaml.safe_dump(namespace.model_dump(exclude_unset=True, exclude_none=True, exclude_defaults=True, by_alias=True),
         sort_keys=False))
 
     flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
@@ -1033,7 +1033,7 @@ def test_dsl2_extra_arguments(
 ):
     namespace = experiment.model.frontends.dsl.Namespace(**dsl_one_workflow_one_component_two_steps_with_edges)
 
-    print(yaml.safe_dump(namespace.dict(exclude_unset=True, exclude_none=True, exclude_defaults=True, by_alias=True),
+    print(yaml.safe_dump(namespace.model_dump(exclude_unset=True, exclude_none=True, exclude_defaults=True, by_alias=True),
         sort_keys=False))
 
     with pytest.raises(experiment.model.errors.DSLInvalidError) as e:

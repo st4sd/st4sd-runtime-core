@@ -260,8 +260,7 @@ class OutputReference:
 
 
 class Parameter(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     name: str = pydantic.Field(
         description="The name of the parameter, must be unique in the parent Signature",
@@ -285,14 +284,13 @@ class InstantiatedParameter(Parameter):
         Returns:
             The value of the parameter, if unset defaults to @default
         """
-        if 'value' in self.__fields_set__:
+        if 'value' in self.model_fields_set:
             return self.value
         return self.default
 
 
 class Signature(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     name: str = pydantic.Field(
         description="The name of the template, must be unique in the parent namespace",
@@ -326,8 +324,7 @@ class WorkflowSignature(Signature):
     )
 
 class ExecuteStep(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     target: TargetReference = pydantic.Field(
         description="Reference to a step name. A string enclosed in <> e.g. <foo>", min_length=3,
@@ -352,8 +349,7 @@ class ExecuteStepEntryInstance(ExecuteStep):
 
 
 class Workflow(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     signature: WorkflowSignature = pydantic.Field(
         description="The Signature of the Workflow template"
@@ -375,8 +371,7 @@ class Workflow(pydantic.BaseModel):
 
 
 class CMemoizationDisable(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     strong: typing.Union[bool, ParameterReference] = pydantic.Field(
         False,
@@ -390,8 +385,7 @@ class CMemoizationDisable(pydantic.BaseModel):
 
 
 class CMemoization(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     embeddingFunction: typing.Optional[str] = pydantic.Field(
         None,
@@ -405,8 +399,7 @@ class CMemoization(pydantic.BaseModel):
 
 
 class CResourceManagerConfig(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     backend: BackendType = pydantic.Field(
         "local",
@@ -420,8 +413,7 @@ class CResourceManagerConfig(pydantic.BaseModel):
 
 
 class CResourceManagerLSF(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     statusRequestInterval: typing_extensions.Annotated[int, pydantic.Field(
         description="How many seconds to wait between polling the status of LSF tasks", ge=20)] = 20
@@ -458,8 +450,7 @@ class CResourceManagerLSF(pydantic.BaseModel):
 
 
 class CResourceManagerKubernetes(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     image: typing.Optional[str] = pydantic.Field(
         None,
@@ -521,8 +512,7 @@ class CResourceManagerKubernetes(pydantic.BaseModel):
 
 
 class CResourceManagerDocker(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     image: typing.Optional[typing.Union[ParameterReference, str]] = pydantic.Field(
         None,
@@ -543,8 +533,7 @@ class CResourceManagerDocker(pydantic.BaseModel):
 
 
 class CResourceManager(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     config: CResourceManagerConfig = pydantic.Field(
         default_factory=CResourceManagerConfig,
@@ -568,8 +557,7 @@ class CResourceManager(pydantic.BaseModel):
 
 
 class COptimizer(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     disable: typing.Optional[bool] = pydantic.Field(
         False,
@@ -598,8 +586,7 @@ class COptimizer(pydantic.BaseModel):
 
 
 class CWorkflowAttributes(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     # VV: TODO Do we want to hide stage and repeatInterval in v0.1.0 ? - the `stage` field seems like it should be
     # part of a Signature - likely the Workflow's signature which we then propagate to Steps of the workflow.
@@ -684,8 +671,7 @@ class CWorkflowAttributes(pydantic.BaseModel):
 
 
 class CResourceRequest(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     numberProcesses: typing.Union[ResourceRequestInt, ParameterReference] = pydantic.Field(
         1,
@@ -720,8 +706,7 @@ class CResourceRequest(pydantic.BaseModel):
 
 
 class CExecutorPre(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     name: typing_extensions.Literal['lsf-dm-in'] = pydantic.Field(
         'lsf-dm-in',
@@ -733,13 +718,11 @@ class CExecutorPre(pydantic.BaseModel):
 
 
 class CExecutorMain(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
 
 class CExecutorPost(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     name: typing_extensions.Literal['lsf-dm-out'] = pydantic.Field(
         'lsf-dm-out',
@@ -752,8 +735,7 @@ class CExecutorPost(pydantic.BaseModel):
 
 
 class CCommand(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     executable: typing.Optional[typing.Union[ParameterReference, str]] = pydantic.Field(
         None,
@@ -899,8 +881,7 @@ def replace_parameter_references(
 
 
 class CExecutors(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     pre: typing.List[CExecutorPre] = pydantic.Field(
         [],
@@ -919,8 +900,7 @@ class CExecutors(pydantic.BaseModel):
 
 
 class Component(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     signature: Signature = pydantic.Field(
         description="The Signature of the Component template"
@@ -954,8 +934,7 @@ class Component(pydantic.BaseModel):
     )
 
 class KeyOutput(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     name: str = pydantic.Field(description="Unique name")
     dataIn: str = pydantic.Field(
@@ -980,8 +959,7 @@ class KeyOutput(pydantic.BaseModel):
 
 
 class InterfaceHookSource(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     pathList: typing.Optional[typing.List[str]] = pydantic.Field(
         default=None, description="List of paths relative to the instance directory. "
@@ -997,34 +975,31 @@ class InterfaceHookSource(pydantic.BaseModel):
     )
 
     @pydantic.model_validator(mode="after")
-    @classmethod
-    def val_mutually_exclusive_fields(cls, value: "InterfaceHookSource") -> "InterfaceHookSource":
-        if len(value.model_dump(exclude_none=True)) != 1:
+    def val_mutually_exclusive_fields(self) -> "InterfaceHookSource":
+        if len(self.model_dump(exclude_none=True)) != 1:
             raise ValueError("Must set exactly 1 field to a non-None value")
 
-        if value.path is not None and len(value.path) == 0:
+        if self.path is not None and len(self.path) == 0:
             raise ValueError("path cannot be empty")
 
-        for p in (value.pathList or []):
+        for p in (self.pathList or []):
             if len(p) == 0:
                 raise ValueError("pathList cannot contain empty paths")
 
-        if value.keyOutput is not None and len(value.keyOutput) == 0:
+        if self.keyOutput is not None and len(self.keyOutput) == 0:
             raise ValueError("keyOutput cannot be empty")
 
-        return value
+        return self
 
 
 class HookBase(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     source: InterfaceHookSource = pydantic.Field(description="On which file(s) to apply the hook on")
 
 
 class HookBaseWithArgs(HookBase):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
     args: typing.Optional[typing.Dict[str, typing.Any]] = pydantic.Field(
         default=None, description="Optional hook arguments"
     )
@@ -1032,12 +1007,11 @@ class HookBaseWithArgs(HookBase):
 
 class HookSingleSourcePath(HookBase):
     @pydantic.model_validator(mode="after")
-    @classmethod
-    def val_exactly_one_path(cls, value: "HookGetInputIDs") -> "HookGetInputIDs":
-        if value.source.path is None and len(value.source.pathList) != 1:
+    def val_exactly_one_path(self) -> "HookSingleSourcePath":
+        if self.source.path is None and len(self.source.pathList) != 1:
             raise ValueError("Must either set path or pathList to exactly 1 path")
 
-        return value
+        return self
 
     def the_path(self) -> str:
         if self.source.path is not None:
@@ -1045,8 +1019,7 @@ class HookSingleSourcePath(HookBase):
         return self.source.pathList[0]
 
 class HookCSVColumnArgs(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     column: str = pydantic.Field(description="Name of the column that contains the ids of the input systems")
 
@@ -1063,8 +1036,7 @@ class HookCSVColumn(HookSingleSourcePath):
 
 
 class InterfaceInputExtractionMethod(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     hookGetInputIds: typing.Optional[HookGetInputIDs] = pydantic.Field(
         default=None, description="Instructions to call the get_input_ids() method from hooks/interface.py. "
@@ -1078,8 +1050,7 @@ class InterfaceInputExtractionMethod(pydantic.BaseModel):
 
 
 class InterfaceInputSpec(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     hasAdditionalData: typing.Optional[bool] = pydantic.Field(
         default=None,
@@ -1104,8 +1075,7 @@ class HookCSVDataFrame(HookBaseWithArgs):
 
 
 class PropertyExtractionMethod(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     hookGetProperties: typing.Optional[HookGetProperties] = pydantic.Field(
         default=None, description="Instructions to execute the method get_properties() from hooks/interface.py "
@@ -1120,16 +1090,14 @@ class PropertyExtractionMethod(pydantic.BaseModel):
     )
 
     @pydantic.model_validator(mode="after")
-    @classmethod
-    def val_mutually_exclusive_fields(cls, value: "PropertyExtractionMethod") -> "PropertyExtractionMethod":
-        if len(value.model_dump(exclude_none=True)) != 1:
+    def val_mutually_exclusive_fields(self) -> "PropertyExtractionMethod":
+        if len(self.model_dump(exclude_none=True)) != 1:
             raise ValueError("Must set exactly 1 field to a non-None value")
-        return value
+        return self
 
 
 class InterfacePropertySpec(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     name: str = pydantic.Field(description="The unique name of the measured property")
     propertyExtractionMethod: PropertyExtractionMethod = pydantic.Field(
@@ -1138,8 +1106,7 @@ class InterfacePropertySpec(pydantic.BaseModel):
 
 
 class Interface(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     # VV: TODO Figure out what `id` is and whether we need it or not
     # id: typing.Optional[str] = pydantic.Field(default=None, description="")
@@ -1176,8 +1143,7 @@ class Interface(pydantic.BaseModel):
 
 
 class Entrypoint(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     # VV: FIXME Rename this into "entryInstance" (i.e. remove the alias)
     entryInstance: str = pydantic.Field(
@@ -1220,8 +1186,7 @@ class Entrypoint(pydantic.BaseModel):
 
 
 class Namespace(pydantic.BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     entrypoint: typing.Optional[Entrypoint] = pydantic.Field(
         None, description="How to execute the entrypoint template"
@@ -1257,7 +1222,7 @@ class ScopeStack:
         ):
             self.location = location
             self.parameters = parameters or {}
-            self.template: typing.Union[Workflow, Component] = template.copy(deep=True)
+            self.template: typing.Union[Workflow, Component] = template.model_copy(deep=True)
             self._dsl_location = list(dsl_location)
             self._template_location = list(template_location)
 
@@ -1304,7 +1269,7 @@ class ScopeStack:
             """
             known_params = {
                 p.name: p.default for p in self.template.signature.parameters
-                if "default" in p.__fields_set__
+                if "default" in p.model_fields_set
             }
 
             for name, value in known_params.items():

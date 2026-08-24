@@ -745,7 +745,7 @@ def test_graph_returns_actual_dsl2(
         p for p in dsl.components[0].signature.parameters if p.name == "environment"
     ][0].default
 
-    dsl_raw = dsl.dict(
+    dsl_raw = dsl.model_dump(
         by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True
     )
 

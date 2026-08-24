@@ -121,7 +121,7 @@ def test_load_dsl2_with_user_variables(
     dsl_one_workflow_one_component_one_step_no_datareferences
 ):
     dsl = experiment.model.frontends.dsl.Namespace(**dsl_one_workflow_one_component_one_step_no_datareferences)\
-        .dict(by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True)
+        .model_dump(by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True)
 
     pkg_dir = os.path.join(output_dir, "workflow.package")
     utils.populate_files(pkg_dir, {"conf/dsl.yaml": yaml.safe_dump(dsl)})
